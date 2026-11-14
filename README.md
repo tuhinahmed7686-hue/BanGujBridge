@@ -55,7 +55,7 @@ Requires Node.js 20 or newer and a normal internet connection (the browser fetch
 ## Testing
 
 ```bash
-npm test           # 27 automated tests
+npm test           # 38 automated tests
 npm run typecheck
 npm run build
 ```
@@ -65,6 +65,21 @@ Automated tests cover: USGS parsing (valid, empty, bad or missing coordinates, m
 The tests use **synthetic fixtures in the real USGS format**. They are never shown in the app as live events.
 
 The built app was also driven in a real headless Chromium browser: rendering, the unavailable state, map markers, popups, event selection, region buttons, tabs, manual and automatic refresh, stale detection and a phone-sized screen. In that browser run USGS responses were replaced by synthetic test events, because the test environment could not reach `earthquake.usgs.gov`. **That run does not prove the live USGS connection.** Use the checklist at the end of this file.
+
+## Troubleshooting: the map shows "Access blocked"
+
+The background map comes from OpenStreetMap, whose tile servers refuse requests that arrive without a `Referer`
+header. Some embedded previews (for example a GitHub Codespaces preview pane) and some privacy tools strip it.
+
+- The app now sets a referrer policy on the map tiles themselves, on the page (`index.html`), and for Cloudflare
+  hosting (`public/_headers`), so a stricter page-level policy no longer removes the Referer.
+- If the map background still fails, a notice appears and earthquakes are drawn on a plain background at their real
+  coordinates. A "Map background not loading?" note explains the usual cause.
+- Limits: the notice appears when tiles fail to load. If a server returns an "Access blocked" image that loads
+  successfully, the app cannot detect it, which is what the help note is for. In that case open the app in a normal
+  browser tab.
+- To check by hand: open the browser developer tools, Network tab, click a tile request, and look for a `Referer`
+  request header.
 
 ## Project structure
 

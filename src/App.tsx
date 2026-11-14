@@ -50,7 +50,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <h1>TwinSignal Live</h1>
+        <h1>BANGUJ Bridge</h1>
         <div className="topbar-status">
           <span className={`pill ${status}`}><span className={`dot ${status}`} aria-hidden="true" /> {STATUS_LABEL[status]}</span>
           <span className="muted">Last successful refresh: {snapshot ? formatDateTime(snapshot.fetchedAt) : 'none yet'}</span>
@@ -71,7 +71,7 @@ export default function App() {
       )}
       {status === 'unavailable' && (
         <div className="banner error" role="alert">
-          Earthquake data is unavailable. TwinSignal Live could not load the USGS feed ({feed.error}). No events are shown. It will retry every {feed.intervalMs / 1000} seconds.
+          Earthquake data is unavailable. BANGUJ Bridge could not load the USGS feed ({feed.error}). No events are shown. It will retry every {feed.intervalMs / 1000} seconds.
         </div>
       )}
 
@@ -141,7 +141,7 @@ export default function App() {
       </main>
 
       <footer className="footer">
-        Source: USGS Earthquake Hazards Program. TwinSignal Live shows observed earthquake reports only. It does not predict
+        Source: USGS Earthquake Hazards Program. BANGUJ Bridge shows observed earthquake reports only. It does not predict
         earthquakes and does not issue official warnings or evacuation instructions. For official guidance, follow your
         national and local authorities.
       </footer>

@@ -59,4 +59,6 @@ h2 { font-size: 1.05rem; margin-bottom: 0.75rem; }
   .layout { grid-template-columns: minmax(0, 1fr); }
   .map { height: 55vh; min-height: 340px; }
   .ext { margin-left: 0.3rem; }
+  .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+  .tab { flex: none; white-space: nowrap; }
 }

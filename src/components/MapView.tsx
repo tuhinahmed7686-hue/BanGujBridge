@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { EarthquakeEvent } from '../types/events';
@@ -8,14 +8,22 @@ import { formatDateTime, formatDepth, formatMagnitude, magnitudeColor, markerRad
 
 function MapController({ region, selected }: { region: RegionId; selected: EarthquakeEvent | null }) {
   const map = useMap();
+  // Every data refresh creates NEW event objects. If the effect below depended on the
+  // object itself, the map would jump back to the selected event every 60 seconds, even
+  // after the user panned away. So it depends on the event id only.
+  const selectedId = selected?.id ?? null;
+  const latest = useRef(selected);
+  latest.current = selected;
   useEffect(() => {
     const { bounds } = getRegion(region);
     if (bounds) map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]]);
-    else map.setView([20, 10], 2);
+    // On a phone-width map, zoom 2 shows under half the world and hides South Asia, so zoom out one level.
+    else map.setView([20, 10], map.getSize().x < 700 ? 1 : 2);
   }, [map, region]);
   useEffect(() => {
-    if (selected) map.flyTo([selected.latitude, selected.longitude], Math.max(map.getZoom(), 5), { duration: 0.6 });
-  }, [map, selected]);
+    const event = latest.current;
+    if (selectedId !== null && event) map.flyTo([event.latitude, event.longitude], Math.max(map.getZoom(), 5), { duration: 0.6 });
+  }, [map, selectedId]);
   return null;
 }
 
@@ -31,7 +39,7 @@ export function MapView({ events, region, selected, onSelect }: Props) {
   const ordered = useMemo(() => [...events].sort((a, b) => (b.magnitude ?? 0) - (a.magnitude ?? 0)), [events]);
   return (
     <div className="map-wrap">
-      <MapContainer center={[20, 10]} zoom={2} minZoom={2} worldCopyJump className="map" scrollWheelZoom>
+      <MapContainer center={[20, 10]} zoom={2} minZoom={1} worldCopyJump className="map" scrollWheelZoom>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"

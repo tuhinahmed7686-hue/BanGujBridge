@@ -1,7 +1,12 @@
 import type { EarthquakeEvent } from '../types/events';
 
+const DATE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
+  year: 'numeric', month: 'short', day: 'numeric',
+  hour: 'numeric', minute: '2-digit', second: '2-digit',
+  timeZoneName: 'short', // so nobody has to guess which time zone a time is in
+};
 export const formatDateTime = (ms: number | null): string =>
-  ms === null ? 'Not provided' : new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' });
+  ms === null ? 'Not provided' : new Date(ms).toLocaleString(undefined, DATE_TIME_OPTIONS);
 
 export const formatMagnitude = (m: number | null): string => (m === null ? 'n/a' : `M ${m.toFixed(1)}`);
 export const formatDepth = (d: number | null): string => (d === null ? 'Not provided' : `${d.toFixed(1)} km`);

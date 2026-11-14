@@ -1,4 +1,4 @@
-# TwinSignal Live
+# BANGUJ Bridge
 
 A bilingual (Bengali and Gujarati) public-safety information monitoring platform, built for the Veritas AI International High School Hackathon 2026 (AI + Languages track).
 
@@ -6,9 +6,9 @@ A bilingual (Bengali and Gujarati) public-safety information monitoring platform
 
 ## Purpose
 
-Public-safety notices often reach people in more than one language, and the versions can disagree. TwinSignal Live aims to (1) monitor official public hazard data and (2) later, check that Bengali and Gujarati versions of the same notice say the same thing.
+Public-safety notices often reach people in more than one language, and the versions can disagree. BANGUJ Bridge aims to (1) monitor official public hazard data and (2) later, check that Bengali and Gujarati versions of the same notice say the same thing.
 
-TwinSignal Live shows **observed earthquake reports** only. It does **not** predict earthquakes and does **not** issue official warnings or evacuation instructions.
+BANGUJ Bridge shows **observed earthquake reports** only. It does **not** predict earthquakes and does **not** issue official warnings or evacuation instructions.
 
 ## Current implementation (Milestone 1)
 
@@ -52,6 +52,20 @@ npm run preview    # serve the production build
 
 Requires Node.js 20 or newer and a normal internet connection (the browser fetches the USGS feed and map tiles).
 
+## Testing
+
+```bash
+npm test           # 27 automated tests
+npm run typecheck
+npm run build
+```
+
+Automated tests cover: USGS parsing (valid, empty, bad or missing coordinates, missing optional fields, coordinate order), network, HTTP and invalid-JSON failures, region filtering, formatting, and the refresh hook (60-second timer, no overlapping requests, stale detection after 2 failed refreshes, recovery, cleanup on unmount, React StrictMode).
+
+The tests use **synthetic fixtures in the real USGS format**. They are never shown in the app as live events.
+
+The built app was also driven in a real headless Chromium browser: rendering, the unavailable state, map markers, popups, event selection, region buttons, tabs, manual and automatic refresh, stale detection and a phone-sized screen. In that browser run USGS responses were replaced by synthetic test events, because the test environment could not reach `earthquake.usgs.gov`. **That run does not prove the live USGS connection.** Use the checklist at the end of this file.
+
 ## Project structure
 
 ```
@@ -62,15 +76,16 @@ src/services/regions.ts          Approximate regions and filtering
 src/hooks/useEarthquakeFeed.ts   60-second refresh, status, stale detection
 src/components/                  Map, feed, details, region buttons, data health
 src/App.tsx                      Page layout and navigation
-tests/                           Vitest tests and test-only fixtures
+tests/                           Vitest tests (parser, regions, format, refresh hook) and test-only fixtures
 ```
 
 ## Current limitations
 
 - The USGS feed is read directly from the browser. If USGS or your network blocks it, the app shows "unavailable" and no events.
 - The feed contains only magnitude 2.5+ events, so small regional quakes will not appear, and quiet regions may show none.
-- The 60-second refresh, duplicate-request guard and timer cleanup are implemented but **not covered by automated tests** yet (no browser test setup).
-- The interface has not been tested across many browsers or with a screen reader.
+- The interface has been exercised in one browser engine (headless Chromium) only, not across many browsers, and not with a screen reader.
+- On a phone, the Global view cannot show the whole world at a readable zoom; people pan to see other regions.
+- Live USGS data has **not** been verified end to end by the developers' tooling yet (see Testing below). Check it on your own machine or after deployment.
 - OpenStreetMap's public tile server is meant for light use. A production deployment needs a proper tile plan.
 - Earthquakes only. No floods, cyclones or weather yet.
 

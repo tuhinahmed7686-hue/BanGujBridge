@@ -33,6 +33,10 @@ h2 { font-size: 1.05rem; margin-bottom: 0.75rem; }
 .chip[aria-pressed="true"] { background: #1c3558; border-color: var(--link); }
 .map-wrap { margin-top: 0.75rem; }
 .map { height: 62vh; min-height: 420px; border: 1px solid var(--line); border-radius: 8px; z-index: 0; }
+.map-wrap[data-tiles="unavailable"] .leaflet-container { background: #0e1b30; }
+.help { color: var(--muted); font-size: 0.85rem; margin-top: 0.5rem; }
+.help summary { cursor: pointer; }
+.help p { margin: 0.4rem 0 0; }
 .legend { color: var(--muted); font-size: 0.82rem; margin: 0.5rem 0 0; }
 .popup { color: #0b1526; line-height: 1.5; }
 .popup a { color: #0b5d99; }

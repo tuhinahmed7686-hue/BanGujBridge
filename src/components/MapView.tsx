@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { EarthquakeEvent } from '../types/events';
 import { getRegion } from '../services/regions';
 import type { RegionId } from '../services/regions';
+import { TILE_ATTRIBUTION, TILE_REFERRER_POLICY, TILE_URL, onTileFailed, onTileLoaded, tileStatus } from '../lib/tiles';
+import type { TileHealth } from '../lib/tiles';
 import { formatDateTime, formatDepth, formatMagnitude, magnitudeColor, markerRadius, placeLabel } from '../lib/format';
 
 function MapController({ region, selected }: { region: RegionId; selected: EarthquakeEvent | null }) {
@@ -37,12 +39,23 @@ interface Props {
 export function MapView({ events, region, selected, onSelect }: Props) {
   // Draw big quakes first so small ones stay clickable on top.
   const ordered = useMemo(() => [...events].sort((a, b) => (b.magnitude ?? 0) - (a.magnitude ?? 0)), [events]);
+  const [tiles, setTiles] = useState<TileHealth>({ loaded: 0, failed: 0 });
+  const status = tileStatus(tiles);
+  const tileHandlers = useMemo(() => ({ tileload: () => setTiles(onTileLoaded), tileerror: () => setTiles(onTileFailed) }), []);
   return (
-    <div className="map-wrap">
+    <div className="map-wrap" data-tiles={status}>
+      {status === 'unavailable' && (
+        <p className="banner info" role="status">
+          The map background could not be loaded, so earthquakes are shown on a plain background. Their positions are
+          still plotted at the real coordinates reported by USGS.
+        </p>
+      )}
       <MapContainer center={[20, 10]} zoom={2} minZoom={1} worldCopyJump className="map" scrollWheelZoom>
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution={TILE_ATTRIBUTION}
+          url={TILE_URL}
+          referrerPolicy={TILE_REFERRER_POLICY}
+          eventHandlers={tileHandlers}
         />
         <MapController region={region} selected={selected} />
         {ordered.map((e) => (
@@ -80,6 +93,14 @@ export function MapView({ events, region, selected, onSelect }: Props) {
         Marker size and colour show reported magnitude: blue under 4, amber 4 to 4.9, orange 5 to 5.9, red 6 and above.
         Colours are a visual aid only, not a risk level.
       </p>
+      <details className="help">
+        <summary>Map background not loading?</summary>
+        <p>
+          The background map comes from OpenStreetMap. If it shows an “Access blocked” image or stays blank, the page may
+          be running inside an embedded preview, or behind a privacy tool that hides where the request comes from. Open the
+          app in a normal browser tab. Earthquake markers are drawn at their true coordinates either way.
+        </p>
+      </details>
     </div>
   );
 }

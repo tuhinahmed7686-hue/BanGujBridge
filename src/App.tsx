@@ -13,7 +13,7 @@ import { useFormat } from './lib/useFormat';
 import { plannedSources } from './services/providers';
 import { filterEventsByRegion } from './services/regions';
 import type { RegionId } from './services/regions';
-
+import { NoticeVerification } from './components/NoticeVerification';
 type Page = 'map' | 'feed' | 'verify' | 'sources';
 const PAGES: { id: Page; labelKey: TranslationKey }[] = [
   { id: 'map', labelKey: 'nav.liveMap' },
@@ -160,13 +160,7 @@ export default function App() {
     </aside>
   </div>
 )}
-        {page === 'verify' && (
-          <section className="panel narrow">
-            <h2>{t('nav.verify')}</h2>
-            <p className="badge">{t('verify.badge')}</p>
-            <p>{t('verify.body')}</p>
-          </section>
-        )}
+       {page === 'verify' && <NoticeVerification />} 
 
         {page === 'sources' && (
           <div className="stack">

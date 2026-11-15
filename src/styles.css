@@ -12,6 +12,12 @@ h2 { font-size: 1.05rem; margin-bottom: 0.75rem; }
 .app { max-width: 1400px; margin: 0 auto; padding: 0 1rem 1rem; }
 .topbar { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; justify-content: space-between; align-items: center; padding: 1rem 0 0.5rem; }
 .topbar h1 { font-size: 1.5rem; letter-spacing: 0.01em; }
+.topbar-tools { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; }
+.lang-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.lang-btn { background: var(--panel); color: var(--muted); border: 0; padding: 0.3rem 0.8rem; font: inherit; cursor: pointer; }
+.lang-btn + .lang-btn { border-left: 1px solid var(--line); }
+.lang-btn:hover { color: var(--text); }
+.lang-btn[aria-pressed="true"] { background: #1c3558; color: var(--text); font-weight: 600; box-shadow: inset 0 -3px 0 var(--accent); }
 .topbar-status { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; align-items: center; }
 .muted, .note, .meta { color: var(--muted); }
 .note { font-size: 0.85rem; margin: 0.5rem 0 0; }
@@ -66,3 +72,18 @@ h2 { font-size: 1.05rem; margin-bottom: 0.75rem; }
   .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
   .tab { flex: none; white-space: nowrap; }
 }
+
+/* Bengali and Gujarati need fonts that contain their scripts, and taller lines so the marks above and below
+   the letters are not cut. Only fonts already on the device are used, so nothing is downloaded. */
+:root {
+  --font-bn: "Noto Sans Bengali", "Nirmala UI", "Shonar Bangla", "Bangla Sangam MN", "Vrinda", "Segoe UI", system-ui, sans-serif;
+  --font-gu: "Noto Sans Gujarati", "Nirmala UI", "Shruti", "Gujarati Sangam MN", "Segoe UI", system-ui, sans-serif;
+}
+html:lang(bn), html:lang(bn) * { font-family: var(--font-bn); }
+html:lang(gu), html:lang(gu) * { font-family: var(--font-gu); }
+html:lang(bn) body, html:lang(gu) body { line-height: 1.75; }
+button.lang-btn:lang(bn) { font-family: var(--font-bn); }
+button.lang-btn:lang(gu) { font-family: var(--font-gu); }
+/* Bengali letters look smaller than Latin ones at the same size, so nudge them up for readability. */
+html:lang(bn) body { font-size: 16.5px; }
+button.lang-btn:lang(bn) { font-size: 1.1em; }

@@ -18,8 +18,8 @@ public-safety notice workspace, before anything else is added.
 | Phase | What | Status |
 |---|---|---|
 | 0 | Map tiles send a Referer (fixes OpenStreetMap "Access blocked" in some previews); graceful fallback if the basemap is unavailable; Cloudflare `_headers` | Done (this branch) |
-| 1 | Bengali, Gujarati and English interface; language switcher; locale-aware dates and numbers; deterministic script-based language detection | Next |
-| 2 | Emergency notice workspace: paste or submit a notice, optional source name, link and time, detected language, original text panel, honest "service not connected" states | Planned |
+| 1 | Bengali, Gujarati and English interface; language switcher; locale-aware dates and numbers | Done (UI translation; Bengali and Gujarati text still needs native review) |
+| 2 | Emergency notice workspace: paste or submit a notice, deterministic script-based language detection, optional source name, link and time, original text panel, honest "service not connected" states | Next |
 | 3 | Cloudflare Worker foundation: health endpoint (reports which providers are really configured), CORS allowlist, input limits, rate limiting | Planned |
 | 4 | Translation between Bengali, Gujarati and English through a real provider, side by side with the original | Planned |
 | 5 | Extraction of location, event, time, severity and safety instructions, with verbatim evidence checked against the source text | Planned |

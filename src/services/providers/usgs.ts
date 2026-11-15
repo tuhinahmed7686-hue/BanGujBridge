@@ -79,7 +79,7 @@ export const usgsProvider: EventProvider = {
       throw new ProviderError('network', 'Could not reach the USGS feed.');
     }
     if (!response.ok) {
-      throw new ProviderError('http', `USGS feed returned HTTP ${response.status}.`);
+      throw new ProviderError('http', `USGS feed returned HTTP ${response.status}.`, response.status);
     }
     let json: unknown;
     try {

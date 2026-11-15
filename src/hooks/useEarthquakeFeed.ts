@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { activeProvider } from '../services/providers';
+import { ProviderError } from '../types/events';
+import type { FeedErrorKind } from '../lib/errors';
 import type { EventProvider, FeedSnapshot } from '../types/events';
 
 export const REFRESH_INTERVAL_MS = 60_000;
@@ -10,6 +12,7 @@ export type FeedStatus = 'loading' | 'live' | 'stale' | 'unavailable';
 export function useEarthquakeFeed(provider: EventProvider = activeProvider, intervalMs = REFRESH_INTERVAL_MS) {
   const [snapshot, setSnapshot] = useState<FeedSnapshot | null>(null); // last GOOD data only
   const [error, setError] = useState<string | null>(null);
+  const [errorInfo, setErrorInfo] = useState<{ kind: FeedErrorKind; status: number | null } | null>(null);
   const [failures, setFailures] = useState(0);
   const [isFetching, setIsFetching] = useState(true);
   const inFlight = useRef<AbortController | null>(null);
@@ -24,10 +27,12 @@ export function useEarthquakeFeed(provider: EventProvider = activeProvider, inte
       if (controller.signal.aborted) return;
       setSnapshot(next);
       setError(null);
+      setErrorInfo(null);
       setFailures(0);
     } catch (err) {
       if (controller.signal.aborted) return;
       setError(err instanceof Error ? err.message : 'Unknown error while loading data.');
+      setErrorInfo(err instanceof ProviderError ? { kind: err.kind, status: err.status ?? null } : { kind: 'unknown', status: null });
       setFailures((n) => n + 1);
     } finally {
       if (inFlight.current === controller) inFlight.current = null;
@@ -49,5 +54,9 @@ export function useEarthquakeFeed(provider: EventProvider = activeProvider, inte
   if (!snapshot) status = error ? 'unavailable' : 'loading';
   else status = failures >= STALE_AFTER_FAILURES ? 'stale' : 'live';
 
-  return { snapshot, status, error, failures, isFetching, refresh: load, intervalMs };
+  return {
+    snapshot, status, error, failures, isFetching, refresh: load, intervalMs,
+    errorKind: errorInfo?.kind ?? null, // language-independent reason, for the UI to translate
+    errorStatus: errorInfo?.status ?? null,
+  };
 }

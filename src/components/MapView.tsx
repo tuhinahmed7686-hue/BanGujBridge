@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet';
+import { AttributionControl, CircleMarker, MapContainer, Popup, TileLayer, ZoomControl, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { EarthquakeEvent } from '../types/events';
 import { getRegion } from '../services/regions';
 import type { RegionId } from '../services/regions';
 import { TILE_ATTRIBUTION, TILE_REFERRER_POLICY, TILE_URL, onTileFailed, onTileLoaded, tileStatus } from '../lib/tiles';
 import type { TileHealth } from '../lib/tiles';
-import { formatDateTime, formatDepth, formatMagnitude, magnitudeColor, markerRadius, placeLabel } from '../lib/format';
+import { useLanguage } from '../i18n/LanguageContext';
+import { magnitudeColor, markerRadius } from '../lib/format';
+import { useFormat } from '../lib/useFormat';
 
 function MapController({ region, selected }: { region: RegionId; selected: EarthquakeEvent | null }) {
   const map = useMap();
@@ -39,18 +41,21 @@ interface Props {
 export function MapView({ events, region, selected, onSelect }: Props) {
   // Draw big quakes first so small ones stay clickable on top.
   const ordered = useMemo(() => [...events].sort((a, b) => (b.magnitude ?? 0) - (a.magnitude ?? 0)), [events]);
+  const { t, language } = useLanguage();
+  const fmt = useFormat();
   const [tiles, setTiles] = useState<TileHealth>({ loaded: 0, failed: 0 });
   const status = tileStatus(tiles);
   const tileHandlers = useMemo(() => ({ tileload: () => setTiles(onTileLoaded), tileerror: () => setTiles(onTileFailed) }), []);
   return (
     <div className="map-wrap" data-tiles={status}>
       {status === 'unavailable' && (
-        <p className="banner info" role="status">
-          The map background could not be loaded, so earthquakes are shown on a plain background. Their positions are
-          still plotted at the real coordinates reported by USGS.
-        </p>
+        <p className="banner info" role="status">{t('map.tilesUnavailable')}</p>
       )}
-      <MapContainer center={[20, 10]} zoom={2} minZoom={1} worldCopyJump className="map" scrollWheelZoom>
+      <MapContainer center={[20, 10]} zoom={2} minZoom={1} worldCopyJump className="map" scrollWheelZoom zoomControl={false} attributionControl={false}>
+        {/* Leaflet's built-in zoom buttons and credit text are English-only, so they are replaced with translated ones. */}
+        {/* key={language}: the zoom control only reads its titles when created, so it is re-created on a language change. */}
+        <ZoomControl key={language} position="topleft" zoomInTitle={t('map.zoomIn')} zoomOutTitle={t('map.zoomOut')} />
+        <AttributionControl prefix='<a href="https://leafletjs.com">Leaflet</a>' />
         <TileLayer
           attribution={TILE_ATTRIBUTION}
           url={TILE_URL}
@@ -73,15 +78,15 @@ export function MapView({ events, region, selected, onSelect }: Props) {
           >
             <Popup>
               <div className="popup">
-                <strong>{formatMagnitude(e.magnitude)}</strong> &middot; {placeLabel(e)}
+                <strong>{fmt.magnitude(e.magnitude)}</strong> &middot; {fmt.place(e)}
                 <br />
-                {formatDateTime(e.occurredAt)}
+                {fmt.dateTime(e.occurredAt)}
                 <br />
-                Depth: {formatDepth(e.depthKm)}
+                {t('map.popupDepth', { depth: fmt.depth(e.depthKm) })}
                 {e.url && (
                   <>
                     <br />
-                    <a href={e.url} target="_blank" rel="noopener noreferrer">USGS event page</a>
+                    <a href={e.url} target="_blank" rel="noopener noreferrer">{t('feed.usgsLink')}</a>
                   </>
                 )}
               </div>
@@ -89,17 +94,10 @@ export function MapView({ events, region, selected, onSelect }: Props) {
           </CircleMarker>
         ))}
       </MapContainer>
-      <p className="legend">
-        Marker size and colour show reported magnitude: blue under 4, amber 4 to 4.9, orange 5 to 5.9, red 6 and above.
-        Colours are a visual aid only, not a risk level.
-      </p>
+      <p className="legend">{t('map.legend')}</p>
       <details className="help">
-        <summary>Map background not loading?</summary>
-        <p>
-          The background map comes from OpenStreetMap. If it shows an “Access blocked” image or stays blank, the page may
-          be running inside an embedded preview, or behind a privacy tool that hides where the request comes from. Open the
-          app in a normal browser tab. Earthquake markers are drawn at their true coordinates either way.
-        </p>
+        <summary>{t('map.helpSummary')}</summary>
+        <p>{t('map.helpBody')}</p>
       </details>
     </div>
   );

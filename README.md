@@ -55,7 +55,7 @@ Requires Node.js 20 or newer and a normal internet connection (the browser fetch
 ## Testing
 
 ```bash
-npm test           # 38 automated tests
+npm test           # 103 automated tests
 npm run typecheck
 npm run build
 ```
@@ -65,6 +65,35 @@ Automated tests cover: USGS parsing (valid, empty, bad or missing coordinates, m
 The tests use **synthetic fixtures in the real USGS format**. They are never shown in the app as live events.
 
 The built app was also driven in a real headless Chromium browser: rendering, the unavailable state, map markers, popups, event selection, region buttons, tabs, manual and automatic refresh, stale detection and a phone-sized screen. In that browser run USGS responses were replaced by synthetic test events, because the test environment could not reach `earthquake.usgs.gov`. **That run does not prove the live USGS connection.** Use the checklist at the end of this file.
+
+## Languages (English, Bengali, Gujarati)
+
+The whole interface can be switched between English, বাংলা and ગુજરાતી with the buttons in the header. The change is
+immediate (no reload), the choice is saved in the browser (`localStorage`, key `banguj.language`) and restored on the next
+visit, and English is used when nothing valid is saved or the browser blocks storage.
+
+- `src/i18n/translations.ts`: the three dictionaries. The `TranslationKey` type comes from the English dictionary, and
+  Bengali and Gujarati are typed so that a missing or extra key stops the build.
+- `src/i18n/LanguageContext.tsx`: `LanguageProvider` and `useLanguage()`, which returns `{ language, setLanguage, t }`.
+  `t('key')` looks up a string, and `t('key', { name: value })` fills `{name}` placeholders.
+- `src/components/LanguageSwitcher.tsx`: the selector (native names, keyboard friendly, active language marked).
+- `src/lib/format.ts` and `useFormat.ts`: dates, numbers and units follow the chosen language (Bengali uses Bengali digits).
+- `src/lib/errors.ts`: feed errors are translated from their kind (network, HTTP status, bad data), not from English text.
+
+**To add or change text:** add the key to `en` first, then to `bn` and `gu` (TypeScript will not build until all three
+match). `npm test` also checks that every translation keeps the same `{placeholders}`, is written in its own script, and
+that no English leaks onto any screen.
+
+**Not translated on purpose:** proper nouns (BANGUJ Bridge, USGS, OpenStreetMap, the names of planned data sources) and raw
+USGS data such as place names, event IDs and links. Only how a value is displayed (digits, date format, unit) changes.
+
+**Translation status:** the Bengali and Gujarati text is a **draft written by an AI assistant and has not been reviewed
+by a native speaker**. Please have it reviewed before public use, especially `footer.text`, `details.disclaimer` and
+`verify.body`.
+
+**Known limits:** the "© OpenStreetMap contributors" credit is kept in its standard English form. Bengali and Gujarati use
+fonts already installed on the device (no font download), which all current phones and computers include. AM/PM and the
+time-zone name are shown the way the browser provides them.
 
 ## Troubleshooting: the map shows "Access blocked"
 
@@ -89,7 +118,8 @@ src/services/providers/usgs.ts   ALL USGS-specific code (fetch + parsing)
 src/services/providers/index.ts  Which provider is active; list of planned sources
 src/services/regions.ts          Approximate regions and filtering
 src/hooks/useEarthquakeFeed.ts   60-second refresh, status, stale detection
-src/components/                  Map, feed, details, region buttons, data health
+src/i18n/                        Translations (en, bn, gu), language context and saved choice
+src/components/                  Map, feed, details, region buttons, data health, language switcher
 src/App.tsx                      Page layout and navigation
 tests/                           Vitest tests (parser, regions, format, refresh hook) and test-only fixtures
 ```

@@ -32,9 +32,11 @@ export interface EventProvider {
 
 export class ProviderError extends Error {
   readonly kind: 'network' | 'http' | 'invalid-json' | 'invalid-format';
-  constructor(kind: ProviderError['kind'], message: string) {
+  readonly status?: number; // HTTP status, when kind is 'http'
+  constructor(kind: ProviderError['kind'], message: string, status?: number) {
     super(message);
     this.name = 'ProviderError';
     this.kind = kind;
+    this.status = status;
   }
 }

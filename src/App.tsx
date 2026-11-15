@@ -59,17 +59,24 @@ export default function App() {
   const showNotice = snapshot && events.length === 0 && region !== 'global';
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <h1>{t('app.name')}</h1>
-        <div className="topbar-tools">
-          <LanguageSwitcher />
-          <div className="topbar-status">
-            <span className={`pill ${status}`}><span className={`dot ${status}`} aria-hidden="true" /> {t(STATUS_KEY[status])}</span>
-            <span className="muted">{t('header.lastRefresh', { time: snapshot ? fmt.dateTime(snapshot.fetchedAt) : t('header.noRefreshYet') })}</span>
-          </div>
-        </div>
-      </header>
+    <div className="app">     
+<header className="command-header">
+  <div className="brand-block">
+    <div className="brand-mark">B</div>
+    <div>
+      <h1>BANGUJ <span>BRIDGE</span></h1>
+      <p>DISASTER INTELLIGENCE NETWORK</p>
+    </div>
+  </div>
+
+  <div className="command-tools">
+    <div className="system-indicator">
+      <span className={`dot ${status}`} />
+      <span>{t(STATUS_KEY[status])}</span>
+    </div>
+    <LanguageSwitcher />
+  </div>
+</header>
       <nav className="tabs" aria-label={t('nav.sections')}>
         {PAGES.map((p) => (
           <button key={p.id} className="tab" aria-current={p.id === page ? 'page' : undefined} onClick={() => setPage(p.id)}>
@@ -86,35 +93,73 @@ export default function App() {
       )}
 
       <main>
-        {(page === 'map' || page === 'feed') && (
-          <div className="layout">
-            <div className="main-col">
-              <RegionControls region={region} onChange={changeRegion} />
-              {page === 'map' ? (
-                <>
-                  {showNotice && <p className="banner info" role="status">{emptyMessage}</p>}
-                  <MapView events={events} region={region} selected={selected} onSelect={setSelectedId} />
-                </>
-              ) : (
-                <section className="panel page-feed">
-                  <h2>{t('feed.titleCount', { count: fmt.count(events.length) })}</h2>
-                  <EventFeed events={events} selectedId={selectedId} onSelect={setSelectedId} limit={100} emptyMessage={emptyMessage} />
-                </section>
-              )}
-            </div>
-            <aside className="side-col">
-              <section className="panel"><h2>{t('details.title')}</h2><EventDetails event={selected} /></section>
-              {page === 'map' && (
-                <section className="panel">
-                  <h2>{t('feed.title')}</h2>
-                  <EventFeed events={events} selectedId={selectedId} onSelect={setSelectedId} limit={8} emptyMessage={emptyMessage} />
-                </section>
-              )}
-              <section className="panel"><h2>{t('health.title')}</h2>{health}</section>
-            </aside>
-          </div>
-        )}
 
+{(page === 'map' || page === 'feed') && (
+  <div className="layout">
+    <div className="main-col">
+      {page === 'map' && (
+        <section className="dashboard-intro">
+          <div>
+            <p className="eyebrow">OPERATIONS / SITUATIONAL AWARENESS</p>
+            <h2>Disaster Intelligence Overview</h2>
+            <p className="muted">
+              Monitoring seismic activity across Bangladesh, Gujarat and the world.
+            </p>
+          </div>
+          <div className="event-counter">
+            <span className="counter-value">{fmt.count(events.length)}</span>
+            <span className="counter-label">EVENTS IN CURRENT VIEW</span>
+          </div>
+        </section>
+      )}
+
+      <RegionControls region={region} onChange={changeRegion} />
+
+      {page === 'map' ? (
+        <>
+          {showNotice && <p className="banner info" role="status">{emptyMessage}</p>}
+          <section className="panel map-panel">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">GEOSPATIAL MONITORING</p>
+                <h2>Live Seismic Map</h2>
+              </div>
+              <span className="live-label">
+                <span className={`dot ${status}`} />
+                {t(STATUS_KEY[status])}
+              </span>
+            </div>
+            <MapView events={events} region={region} selected={selected} onSelect={setSelectedId} />
+          </section>
+        </>
+      ) : (
+        <section className="panel page-feed">
+          <h2>{t('feed.titleCount', { count: fmt.count(events.length) })}</h2>
+          <EventFeed events={events} selectedId={selectedId} onSelect={setSelectedId} limit={100} emptyMessage={emptyMessage} />
+        </section>
+      )}
+    </div>
+
+    <aside className="side-col">
+      <section className="panel">
+        <h2>{t('details.title')}</h2>
+        <EventDetails event={selected} />
+      </section>
+
+      {page === 'map' && (
+        <section className="panel">
+          <h2>{t('feed.title')}</h2>
+          <EventFeed events={events} selectedId={selectedId} onSelect={setSelectedId} limit={8} emptyMessage={emptyMessage} />
+        </section>
+      )}
+
+      <section className="panel">
+        <h2>{t('health.title')}</h2>
+        {health}
+      </section>
+    </aside>
+  </div>
+)}
         {page === 'verify' && (
           <section className="panel narrow">
             <h2>{t('nav.verify')}</h2>

@@ -87,3 +87,208 @@ button.lang-btn:lang(gu) { font-family: var(--font-gu); }
 /* Bengali letters look smaller than Latin ones at the same size, so nudge them up for readability. */
 html:lang(bn) body { font-size: 16.5px; }
 button.lang-btn:lang(bn) { font-size: 1.1em; }
+
+/* ==========================================
+   BANGUJ BRIDGE — INTELLIGENCE UI REDESIGN
+   ========================================== */
+
+:root {
+  --bg: #080f1c;
+  --panel: #101c2d;
+  --line: #26364b;
+  --text: #edf4fc;
+  --muted: #91a4bb;
+  --link: #64c9ed;
+  --accent: #42c5d9;
+  --ok: #43c99a;
+  --warn: #f3b94f;
+  --bad: #ed646b;
+}
+
+body {
+  background:
+    radial-gradient(ellipse at 50% -20%, #17304a 0%, transparent 55%),
+    var(--bg);
+  color: var(--text);
+}
+
+.app {
+  max-width: 1680px;
+  padding: 0 28px 28px;
+}
+
+.topbar {
+  min-height: 82px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.topbar h1 {
+  font-size: 1.55rem;
+  font-weight: 750;
+  letter-spacing: -0.04em;
+}
+
+.tabs {
+  gap: 8px;
+  margin: 0 0 24px;
+  padding: 12px 0 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.tab {
+  padding: 12px 16px;
+  border-radius: 7px 7px 0 0;
+  border-bottom-width: 2px;
+  transition: background .18s ease, color .18s ease;
+}
+
+.tab:hover {
+  background: #182a40;
+}
+
+.tab[aria-current="page"] {
+  color: #72d9ee;
+  background: #14283a;
+  border-bottom-color: var(--accent);
+}
+
+.layout {
+  grid-template-columns: minmax(0, 1fr) 350px;
+  gap: 18px;
+}
+
+.side-col,
+.stack {
+  gap: 16px;
+}
+
+.panel {
+  background: linear-gradient(145deg, #122137, #0e1929);
+  border: 1px solid #263950;
+  border-radius: 11px;
+  padding: 19px;
+  box-shadow: 0 8px 28px #00000018;
+}
+
+.panel h2 {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -.015em;
+}
+
+.map-panel {
+  padding: 14px;
+}
+
+.map {
+  height: 68vh;
+  min-height: 480px;
+  border-radius: 8px;
+  border: 1px solid #30455e;
+  overflow: hidden;
+}
+
+.map-wrap {
+  margin-top: 0;
+}
+
+.pill {
+  padding: 5px 11px;
+  font-size: .82rem;
+  font-weight: 650;
+  background: #15263a;
+}
+
+.metric-card,
+.panel,
+.tab,
+.chip,
+.primary {
+  transition: border-color .18s ease, background .18s ease;
+}
+
+.chip {
+  border-radius: 7px;
+  padding: 8px 13px;
+  background: #13243a;
+}
+
+.chip:hover {
+  border-color: var(--accent);
+}
+
+.chip[aria-pressed="true"] {
+  background: #15364a;
+  border-color: var(--accent);
+  color: #8ce8f4;
+}
+
+.feed-row {
+  padding: 10px 5px;
+  border-bottom: 1px solid #26364b;
+}
+
+.feed-row.selected {
+  background: #18324a;
+  border-radius: 6px;
+}
+
+.feed-item {
+  padding: 6px;
+}
+
+.mag {
+  border-radius: 5px;
+}
+
+.primary {
+  background: #087eaa;
+  border-radius: 7px;
+  font-weight: 650;
+}
+
+.primary:hover {
+  background: #0998c5;
+}
+
+.badge {
+  border-radius: 5px;
+  background: #17283b;
+  padding: 3px 8px;
+}
+
+.footer {
+  margin-top: 30px;
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 900px) {
+  .app {
+    padding: 0 14px 20px;
+  }
+
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .map {
+    height: 58vh;
+    min-height: 350px;
+  }
+}
+
+@media (max-width: 520px) {
+  .topbar {
+    align-items: flex-start;
+  }
+
+  .topbar-tools {
+    width: 100%;
+  }
+
+  .panel {
+    padding: 14px;
+  }
+}

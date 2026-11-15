@@ -1,0 +1,1937 @@
+From 128212b1cafebafac927bdfb54bd500b35afb2bf Mon Sep 17 00:00:00 2001
+From: "Claude (AI assistant)" <noreply@anthropic.com>
+Date: Sun, 15 Nov 2026 08:09:43 +0000
+Subject: [PATCH] Phase 1: English, Bengali and Gujarati interface with saved
+ language choice, switcher, locale-aware formatting and tests
+
+---
+ README.md                           |  34 ++-
+ docs/ROADMAP.md                     |   4 +-
+ src/App.tsx                         | 106 ++++-----
+ src/components/DataHealth.tsx       |  48 ++--
+ src/components/EventDetails.tsx     |  27 +--
+ src/components/EventFeed.tsx        |  15 +-
+ src/components/LanguageSwitcher.tsx |  25 ++
+ src/components/MapView.tsx          |  40 ++--
+ src/components/RegionControls.tsx   |  22 +-
+ src/hooks/useEarthquakeFeed.ts      |  11 +-
+ src/i18n/LanguageContext.tsx        |  92 ++++++++
+ src/i18n/translations.ts            | 345 ++++++++++++++++++++++++++++
+ src/lib/errors.ts                   |  14 ++
+ src/lib/format.ts                   |  32 ++-
+ src/lib/useFormat.ts                |  20 ++
+ src/main.tsx                        |   5 +-
+ src/services/providers/usgs.ts      |   2 +-
+ src/styles.css                      |  21 ++
+ src/types/events.ts                 |   4 +-
+ tests/LanguageContext.test.ts       | 151 ++++++++++++
+ tests/domHelpers.ts                 |  35 +++
+ tests/feedErrors.test.ts            |  54 +++++
+ tests/formatLocale.test.ts          |  45 ++++
+ tests/i18nApp.test.ts               | 173 ++++++++++++++
+ tests/languageStorage.test.ts       |  41 ++++
+ tests/translations.test.ts          |  80 +++++++
+ 26 files changed, 1316 insertions(+), 130 deletions(-)
+ create mode 100644 src/components/LanguageSwitcher.tsx
+ create mode 100644 src/i18n/LanguageContext.tsx
+ create mode 100644 src/i18n/translations.ts
+ create mode 100644 src/lib/errors.ts
+ create mode 100644 src/lib/useFormat.ts
+ create mode 100644 tests/LanguageContext.test.ts
+ create mode 100644 tests/domHelpers.ts
+ create mode 100644 tests/feedErrors.test.ts
+ create mode 100644 tests/formatLocale.test.ts
+ create mode 100644 tests/i18nApp.test.ts
+ create mode 100644 tests/languageStorage.test.ts
+ create mode 100644 tests/translations.test.ts
+
+diff --git a/README.md b/README.md
+index ac36d0b..b97f05c 100644
+--- a/README.md
++++ b/README.md
+@@ -55,7 +55,7 @@ Requires Node.js 20 or newer and a normal internet connection (the browser fetch
+ ## Testing
+ 
+ ```bash
+-npm test           # 38 automated tests
++npm test           # 103 automated tests
+ npm run typecheck
+ npm run build
+ ```
+@@ -66,6 +66,35 @@ The tests use **synthetic fixtures in the real USGS format**. They are never sho
+ 
+ The built app was also driven in a real headless Chromium browser: rendering, the unavailable state, map markers, popups, event selection, region buttons, tabs, manual and automatic refresh, stale detection and a phone-sized screen. In that browser run USGS responses were replaced by synthetic test events, because the test environment could not reach `earthquake.usgs.gov`. **That run does not prove the live USGS connection.** Use the checklist at the end of this file.
+ 
++## Languages (English, Bengali, Gujarati)
++
++The whole interface can be switched between English, বাংলা and ગુજરાતી with the buttons in the header. The change is
++immediate (no reload), the choice is saved in the browser (`localStorage`, key `banguj.language`) and restored on the next
++visit, and English is used when nothing valid is saved or the browser blocks storage.
++
++- `src/i18n/translations.ts`: the three dictionaries. The `TranslationKey` type comes from the English dictionary, and
++  Bengali and Gujarati are typed so that a missing or extra key stops the build.
++- `src/i18n/LanguageContext.tsx`: `LanguageProvider` and `useLanguage()`, which returns `{ language, setLanguage, t }`.
++  `t('key')` looks up a string, and `t('key', { name: value })` fills `{name}` placeholders.
++- `src/components/LanguageSwitcher.tsx`: the selector (native names, keyboard friendly, active language marked).
++- `src/lib/format.ts` and `useFormat.ts`: dates, numbers and units follow the chosen language (Bengali uses Bengali digits).
++- `src/lib/errors.ts`: feed errors are translated from their kind (network, HTTP status, bad data), not from English text.
++
++**To add or change text:** add the key to `en` first, then to `bn` and `gu` (TypeScript will not build until all three
++match). `npm test` also checks that every translation keeps the same `{placeholders}`, is written in its own script, and
++that no English leaks onto any screen.
++
++**Not translated on purpose:** proper nouns (BANGUJ Bridge, USGS, OpenStreetMap, the names of planned data sources) and raw
++USGS data such as place names, event IDs and links. Only how a value is displayed (digits, date format, unit) changes.
++
++**Translation status:** the Bengali and Gujarati text is a **draft written by an AI assistant and has not been reviewed
++by a native speaker**. Please have it reviewed before public use, especially `footer.text`, `details.disclaimer` and
++`verify.body`.
++
++**Known limits:** the "© OpenStreetMap contributors" credit is kept in its standard English form. Bengali and Gujarati use
++fonts already installed on the device (no font download), which all current phones and computers include. AM/PM and the
++time-zone name are shown the way the browser provides them.
++
+ ## Troubleshooting: the map shows "Access blocked"
+ 
+ The background map comes from OpenStreetMap, whose tile servers refuse requests that arrive without a `Referer`
+@@ -89,7 +118,8 @@ src/services/providers/usgs.ts   ALL USGS-specific code (fetch + parsing)
+ src/services/providers/index.ts  Which provider is active; list of planned sources
+ src/services/regions.ts          Approximate regions and filtering
+ src/hooks/useEarthquakeFeed.ts   60-second refresh, status, stale detection
+-src/components/                  Map, feed, details, region buttons, data health
++src/i18n/                        Translations (en, bn, gu), language context and saved choice
++src/components/                  Map, feed, details, region buttons, data health, language switcher
+ src/App.tsx                      Page layout and navigation
+ tests/                           Vitest tests (parser, regions, format, refresh hook) and test-only fixtures
+ ```
+diff --git a/docs/ROADMAP.md b/docs/ROADMAP.md
+index f45ff97..59e9312 100644
+--- a/docs/ROADMAP.md
++++ b/docs/ROADMAP.md
+@@ -18,8 +18,8 @@ public-safety notice workspace, before anything else is added.
+ | Phase | What | Status |
+ |---|---|---|
+ | 0 | Map tiles send a Referer (fixes OpenStreetMap "Access blocked" in some previews); graceful fallback if the basemap is unavailable; Cloudflare `_headers` | Done (this branch) |
+-| 1 | Bengali, Gujarati and English interface; language switcher; locale-aware dates and numbers; deterministic script-based language detection | Next |
+-| 2 | Emergency notice workspace: paste or submit a notice, optional source name, link and time, detected language, original text panel, honest "service not connected" states | Planned |
++| 1 | Bengali, Gujarati and English interface; language switcher; locale-aware dates and numbers | Done (UI translation; Bengali and Gujarati text still needs native review) |
++| 2 | Emergency notice workspace: paste or submit a notice, deterministic script-based language detection, optional source name, link and time, original text panel, honest "service not connected" states | Next |
+ | 3 | Cloudflare Worker foundation: health endpoint (reports which providers are really configured), CORS allowlist, input limits, rate limiting | Planned |
+ | 4 | Translation between Bengali, Gujarati and English through a real provider, side by side with the original | Planned |
+ | 5 | Extraction of location, event, time, severity and safety instructions, with verbatim evidence checked against the source text | Planned |
+diff --git a/src/App.tsx b/src/App.tsx
+index 5b5914b..c6eb975 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -1,27 +1,36 @@
+ import { useMemo, useState } from 'react';
+-import { DataHealth, STATUS_LABEL } from './components/DataHealth';
++import { DataHealth, STATUS_KEY } from './components/DataHealth';
+ import { EventDetails } from './components/EventDetails';
+ import { EventFeed } from './components/EventFeed';
+ import { MapView } from './components/MapView';
+-import { RegionControls } from './components/RegionControls';
++import { LanguageSwitcher } from './components/LanguageSwitcher';
++import { REGION_NAME_KEY, RegionControls } from './components/RegionControls';
+ import { useEarthquakeFeed } from './hooks/useEarthquakeFeed';
+-import { formatDateTime } from './lib/format';
++import { useLanguage } from './i18n/LanguageContext';
++import type { TranslationKey } from './i18n/translations';
++import { describeFeedError } from './lib/errors';
++import { useFormat } from './lib/useFormat';
+ import { plannedSources } from './services/providers';
+-import { filterEventsByRegion, getRegion } from './services/regions';
++import { filterEventsByRegion } from './services/regions';
+ import type { RegionId } from './services/regions';
+ 
+ type Page = 'map' | 'feed' | 'verify' | 'sources';
+-const PAGES: { id: Page; label: string }[] = [
+-  { id: 'map', label: 'Live Map' },
+-  { id: 'feed', label: 'Event Feed' },
+-  { id: 'verify', label: 'Bilingual Alert Verification' },
+-  { id: 'sources', label: 'Sources and Data Health' },
++const PAGES: { id: Page; labelKey: TranslationKey }[] = [
++  { id: 'map', labelKey: 'nav.liveMap' },
++  { id: 'feed', labelKey: 'nav.eventFeed' },
++  { id: 'verify', labelKey: 'nav.verify' },
++  { id: 'sources', labelKey: 'nav.sources' },
+ ];
++const PLANNED_KEY: Record<(typeof plannedSources)[number]['id'], TranslationKey> = {
++  gdacs: 'planned.gdacs', ffwc: 'planned.ffwc', imd: 'planned.imd', 'open-meteo': 'planned.openMeteo', gdelt: 'planned.gdelt',
++};
+ 
+ export default function App() {
+   const [page, setPage] = useState<Page>('map');
+   const [region, setRegion] = useState<RegionId>('global');
+   const [selectedId, setSelectedId] = useState<string | null>(null);
++  const { t } = useLanguage();
++  const fmt = useFormat();
+   const feed = useEarthquakeFeed();
+   const { snapshot, status } = feed;
+ 
+@@ -33,16 +42,18 @@ export default function App() {
+     setSelectedId(null);
+   };
+ 
+-  let emptyMessage = 'No events to show.';
+-  if (!snapshot) emptyMessage = status === 'loading' ? 'Loading earthquake reports from USGS...' : 'No data to show because the USGS feed is unavailable.';
++  let emptyMessage = t('feed.empty');
++  if (!snapshot) emptyMessage = status === 'loading' ? t('feed.loading') : t('feed.unavailable');
+   else if (events.length === 0 && region !== 'global')
+-    emptyMessage = `No earthquakes of magnitude 2.5 or higher in the USGS past-7-days feed fall inside the approximate ${getRegion(region).label.replace(' view', '')} search area.`;
++    emptyMessage = t('region.emptyNotice', { region: t(REGION_NAME_KEY[region]) });
++  const intervalSeconds = feed.intervalMs / 1000;
++  const errorReason = describeFeedError(t, feed.errorKind ?? 'unknown', feed.errorStatus);
+ 
+   const health = (
+     <DataHealth
+-      status={status} snapshot={snapshot} error={feed.error} failures={feed.failures}
++      status={status} snapshot={snapshot} errorKind={feed.errorKind} errorStatus={feed.errorStatus} failures={feed.failures}
+       isFetching={feed.isFetching} shownCount={events.length}
+-      intervalSeconds={feed.intervalMs / 1000} onRefresh={() => void feed.refresh()}
++      intervalSeconds={intervalSeconds} onRefresh={() => void feed.refresh()}
+     />
+   );
+   const showNotice = snapshot && events.length === 0 && region !== 'global';
+@@ -50,29 +61,28 @@ export default function App() {
+   return (
+     <div className="app">
+       <header className="topbar">
+-        <h1>BANGUJ Bridge</h1>
+-        <div className="topbar-status">
+-          <span className={`pill ${status}`}><span className={`dot ${status}`} aria-hidden="true" /> {STATUS_LABEL[status]}</span>
+-          <span className="muted">Last successful refresh: {snapshot ? formatDateTime(snapshot.fetchedAt) : 'none yet'}</span>
++        <h1>{t('app.name')}</h1>
++        <div className="topbar-tools">
++          <LanguageSwitcher />
++          <div className="topbar-status">
++            <span className={`pill ${status}`}><span className={`dot ${status}`} aria-hidden="true" /> {t(STATUS_KEY[status])}</span>
++            <span className="muted">{t('header.lastRefresh', { time: snapshot ? fmt.dateTime(snapshot.fetchedAt) : t('header.noRefreshYet') })}</span>
++          </div>
+         </div>
+       </header>
+-      <nav className="tabs" aria-label="Sections">
++      <nav className="tabs" aria-label={t('nav.sections')}>
+         {PAGES.map((p) => (
+           <button key={p.id} className="tab" aria-current={p.id === page ? 'page' : undefined} onClick={() => setPage(p.id)}>
+-            {p.label}
++            {t(p.labelKey)}
+           </button>
+         ))}
+       </nav>
+ 
+       {status === 'stale' && snapshot && (
+-        <div className="banner warn" role="status">
+-          Showing stale data. The last successful fetch was {formatDateTime(snapshot.fetchedAt)}, and recent refreshes have failed. These events may be out of date.
+-        </div>
++        <div className="banner warn" role="status">{t('banner.stale', { time: fmt.dateTime(snapshot.fetchedAt) })}</div>
+       )}
+       {status === 'unavailable' && (
+-        <div className="banner error" role="alert">
+-          Earthquake data is unavailable. BANGUJ Bridge could not load the USGS feed ({feed.error}). No events are shown. It will retry every {feed.intervalMs / 1000} seconds.
+-        </div>
++        <div className="banner error" role="alert">{t('banner.unavailable', { reason: errorReason, seconds: fmt.count(intervalSeconds) })}</div>
+       )}
+ 
+       <main>
+@@ -87,64 +97,54 @@ export default function App() {
+                 </>
+               ) : (
+                 <section className="panel page-feed">
+-                  <h2>Latest earthquakes ({events.length})</h2>
++                  <h2>{t('feed.titleCount', { count: fmt.count(events.length) })}</h2>
+                   <EventFeed events={events} selectedId={selectedId} onSelect={setSelectedId} limit={100} emptyMessage={emptyMessage} />
+                 </section>
+               )}
+             </div>
+             <aside className="side-col">
+-              <section className="panel"><h2>Event details</h2><EventDetails event={selected} /></section>
++              <section className="panel"><h2>{t('details.title')}</h2><EventDetails event={selected} /></section>
+               {page === 'map' && (
+                 <section className="panel">
+-                  <h2>Latest earthquakes</h2>
++                  <h2>{t('feed.title')}</h2>
+                   <EventFeed events={events} selectedId={selectedId} onSelect={setSelectedId} limit={8} emptyMessage={emptyMessage} />
+                 </section>
+               )}
+-              <section className="panel"><h2>Data health</h2>{health}</section>
++              <section className="panel"><h2>{t('health.title')}</h2>{health}</section>
+             </aside>
+           </div>
+         )}
+ 
+         {page === 'verify' && (
+           <section className="panel narrow">
+-            <h2>Bilingual Alert Verification</h2>
+-            <p className="badge">Planned, not implemented</p>
+-            <p>
+-              A future milestone will compare Bengali and Gujarati versions of important public notices and check
+-              whether meaning, dates, times, locations, instructions and negation agree. No verification feature or AI
+-              model exists in this version.
+-            </p>
++            <h2>{t('nav.verify')}</h2>
++            <p className="badge">{t('verify.badge')}</p>
++            <p>{t('verify.body')}</p>
+           </section>
+         )}
+ 
+         {page === 'sources' && (
+           <div className="stack">
+-            <section className="panel"><h2>Data health</h2>{health}</section>
++            <section className="panel"><h2>{t('health.title')}</h2>{health}</section>
+             <section className="panel">
+-              <h2>Active source</h2>
+-              <p>
+-                <strong>USGS Earthquake Hazards Program</strong>: magnitude 2.5+ earthquakes worldwide over the past seven days, read
+-                directly from the public{' '}
+-                <a href="https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php" target="_blank" rel="noopener noreferrer">GeoJSON summary feed</a>.
+-                USGS data is public information from the U.S. Geological Survey.
+-              </p>
+-              <p>Map tiles: &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors.</p>
++              <h2>{t('sources.activeTitle')}</h2>
++              <p><strong>{t('sources.name')}</strong><br />{t('sources.activeDesc')}</p>
++              <p><a href="https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php" target="_blank" rel="noopener noreferrer">{t('sources.feedLink')}</a></p>
++              <p>{t('sources.tilesLabel')}: &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors.</p>
+             </section>
+             <section className="panel">
+-              <h2>Planned sources (not connected)</h2>
++              <h2>{t('sources.plannedTitle')}</h2>
+               <ul className="plain">
+-                {plannedSources.map((s) => (<li key={s.id}><strong>{s.name}</strong>: {s.note}. <span className="badge">Planned</span></li>))}
++                {plannedSources.map((s) => (
++                  <li key={s.id}><strong>{s.name}</strong> &mdash; {t(PLANNED_KEY[s.id])} <span className="badge">{t('sources.plannedBadge')}</span></li>
++                ))}
+               </ul>
+             </section>
+           </div>
+         )}
+       </main>
+ 
+-      <footer className="footer">
+-        Source: USGS Earthquake Hazards Program. BANGUJ Bridge shows observed earthquake reports only. It does not predict
+-        earthquakes and does not issue official warnings or evacuation instructions. For official guidance, follow your
+-        national and local authorities.
+-      </footer>
++      <footer className="footer">{t('footer.text')}</footer>
+     </div>
+   );
+ }
+diff --git a/src/components/DataHealth.tsx b/src/components/DataHealth.tsx
+index a387c89..448a6ef 100644
+--- a/src/components/DataHealth.tsx
++++ b/src/components/DataHealth.tsx
+@@ -1,18 +1,23 @@
++import { useLanguage } from '../i18n/LanguageContext';
++import type { TranslationKey } from '../i18n/translations';
+ import type { FeedStatus } from '../hooks/useEarthquakeFeed';
++import { describeFeedError } from '../lib/errors';
++import type { FeedErrorKind } from '../lib/errors';
++import { useFormat } from '../lib/useFormat';
+ import type { FeedSnapshot } from '../types/events';
+-import { formatDateTime } from '../lib/format';
+ 
+-export const STATUS_LABEL: Record<FeedStatus, string> = {
+-  loading: 'Connecting to USGS',
+-  live: 'Connected to USGS',
+-  stale: 'Stale: refreshes are failing',
+-  unavailable: 'Unavailable: could not load USGS data',
++export const STATUS_KEY: Record<FeedStatus, TranslationKey> = {
++  loading: 'status.loading',
++  live: 'status.live',
++  stale: 'status.stale',
++  unavailable: 'status.unavailable',
+ };
+ 
+ interface Props {
+   status: FeedStatus;
+   snapshot: FeedSnapshot | null;
+-  error: string | null;
++  errorKind: FeedErrorKind | null;
++  errorStatus: number | null;
+   failures: number;
+   isFetching: boolean;
+   shownCount: number;
+@@ -20,26 +25,31 @@ interface Props {
+   onRefresh: () => void;
+ }
+ 
+-export function DataHealth({ status, snapshot, error, failures, isFetching, shownCount, intervalSeconds, onRefresh }: Props) {
++export function DataHealth({ status, snapshot, errorKind, errorStatus, failures, isFetching, shownCount, intervalSeconds, onRefresh }: Props) {
++  const { t } = useLanguage();
++  const fmt = useFormat();
++  const na = t('common.notAvailable');
+   return (
+     <div>
+       <dl className="details">
+-        <dt>Connection</dt>
+-        <dd><span className={`dot ${status}`} aria-hidden="true" /> {STATUS_LABEL[status]}</dd>
+-        <dt>Last successful fetch</dt><dd>{snapshot ? formatDateTime(snapshot.fetchedAt) : 'No successful fetch yet'}</dd>
+-        <dt>Feed generated by USGS</dt><dd>{snapshot ? formatDateTime(snapshot.sourceGeneratedAt) : 'Not available'}</dd>
+-        <dt>Events received</dt><dd>{snapshot ? snapshot.events.length : 'Not available'}</dd>
+-        <dt>Events in this view</dt><dd>{snapshot ? shownCount : 'Not available'}</dd>
+-        {snapshot && snapshot.skippedCount > 0 && (<><dt>Records skipped</dt><dd>{snapshot.skippedCount} (missing or invalid data)</dd></>)}
+-        <dt>Automatic refresh</dt><dd>Every {intervalSeconds} seconds while this page is open</dd>
++        <dt>{t('health.connection')}</dt>
++        <dd><span className={`dot ${status}`} aria-hidden="true" /> {t(STATUS_KEY[status])}</dd>
++        <dt>{t('health.lastFetch')}</dt><dd>{snapshot ? fmt.dateTime(snapshot.fetchedAt) : t('health.noFetchYet')}</dd>
++        <dt>{t('health.generated')}</dt><dd>{snapshot ? fmt.dateTime(snapshot.sourceGeneratedAt) : na}</dd>
++        <dt>{t('health.received')}</dt><dd>{snapshot ? fmt.count(snapshot.events.length) : na}</dd>
++        <dt>{t('health.inView')}</dt><dd>{snapshot ? fmt.count(shownCount) : na}</dd>
++        {snapshot && snapshot.skippedCount > 0 && (
++          <><dt>{t('health.skipped')}</dt><dd>{t('health.skippedValue', { count: fmt.count(snapshot.skippedCount) })}</dd></>
++        )}
++        <dt>{t('health.autoRefresh')}</dt><dd>{t('health.autoRefreshValue', { seconds: fmt.count(intervalSeconds) })}</dd>
+       </dl>
+-      {error && (
++      {errorKind && (
+         <p className="error" role="alert">
+-          Latest refresh failed: {error} ({failures} in a row)
++          {t('health.refreshFailed', { reason: describeFeedError(t, errorKind, errorStatus), count: fmt.count(failures) })}
+         </p>
+       )}
+       <button className="primary" onClick={onRefresh} disabled={isFetching}>
+-        {isFetching ? 'Refreshing...' : 'Refresh now'}
++        {isFetching ? t('health.refreshing') : t('health.refreshNow')}
+       </button>
+     </div>
+   );
+diff --git a/src/components/EventDetails.tsx b/src/components/EventDetails.tsx
+index 301c5b6..a822cc1 100644
+--- a/src/components/EventDetails.tsx
++++ b/src/components/EventDetails.tsx
+@@ -1,23 +1,24 @@
++import { useLanguage } from '../i18n/LanguageContext';
++import { useFormat } from '../lib/useFormat';
+ import type { EarthquakeEvent } from '../types/events';
+-import { formatDateTime, formatDepth, formatMagnitude, placeLabel } from '../lib/format';
+ 
+ export function EventDetails({ event }: { event: EarthquakeEvent | null }) {
+-  if (!event) return <p className="empty">Select a marker on the map or an event in the feed to see its details.</p>;
++  const { t } = useLanguage();
++  const fmt = useFormat();
++  if (!event) return <p className="empty">{t('details.selectPrompt')}</p>;
+   return (
+     <div>
+-      <h3 className="detail-title">{formatMagnitude(event.magnitude)} &middot; {placeLabel(event)}</h3>
++      <h3 className="detail-title">{fmt.magnitude(event.magnitude)} &middot; {fmt.place(event)}</h3>
+       <dl className="details">
+-        <dt>Event time</dt><dd>{formatDateTime(event.occurredAt)}</dd>
+-        <dt>Last updated by USGS</dt><dd>{formatDateTime(event.updatedAt)}</dd>
+-        <dt>Depth</dt><dd>{formatDepth(event.depthKm)}</dd>
+-        <dt>Latitude</dt><dd>{event.latitude.toFixed(3)}</dd>
+-        <dt>Longitude</dt><dd>{event.longitude.toFixed(3)}</dd>
+-        <dt>USGS event ID</dt><dd>{event.id}</dd>
++        <dt>{t('details.eventTime')}</dt><dd>{fmt.dateTime(event.occurredAt)}</dd>
++        <dt>{t('details.updated')}</dt><dd>{fmt.dateTime(event.updatedAt)}</dd>
++        <dt>{t('details.depth')}</dt><dd>{fmt.depth(event.depthKm)}</dd>
++        <dt>{t('details.latitude')}</dt><dd>{fmt.coordinate(event.latitude)}</dd>
++        <dt>{t('details.longitude')}</dt><dd>{fmt.coordinate(event.longitude)}</dd>
++        <dt>{t('details.eventId')}</dt><dd>{event.id}</dd>
+       </dl>
+-      {event.url && <a className="ext" href={event.url} target="_blank" rel="noopener noreferrer">Open official USGS event page</a>}
+-      <p className="note">
+-        This is an observed earthquake report from USGS. It is not a forecast and not an official evacuation instruction.
+-      </p>
++      {event.url && <a className="ext" href={event.url} target="_blank" rel="noopener noreferrer">{t('details.openOfficial')}</a>}
++      <p className="note">{t('details.disclaimer')}</p>
+     </div>
+   );
+ }
+diff --git a/src/components/EventFeed.tsx b/src/components/EventFeed.tsx
+index e40a983..8542d45 100644
+--- a/src/components/EventFeed.tsx
++++ b/src/components/EventFeed.tsx
+@@ -1,5 +1,7 @@
++import { useLanguage } from '../i18n/LanguageContext';
++import { magnitudeColor } from '../lib/format';
++import { useFormat } from '../lib/useFormat';
+ import type { EarthquakeEvent } from '../types/events';
+-import { formatDateTime, formatDepth, formatMagnitude, magnitudeColor, placeLabel } from '../lib/format';
+ 
+ interface Props {
+   events: EarthquakeEvent[];
+@@ -10,20 +12,23 @@ interface Props {
+ }
+ 
+ export function EventFeed({ events, selectedId, onSelect, limit, emptyMessage }: Props) {
++  const { t } = useLanguage();
++  const fmt = useFormat();
+   if (events.length === 0) return <p className="empty">{emptyMessage}</p>;
+   return (
+     <ul className="feed">
+       {events.slice(0, limit).map((e) => (
+         <li key={e.id} className={e.id === selectedId ? 'feed-row selected' : 'feed-row'}>
+           <button className="feed-item" onClick={() => onSelect(e.id)} aria-pressed={e.id === selectedId}>
+-            <span className="mag" style={{ background: magnitudeColor(e.magnitude) }}>{formatMagnitude(e.magnitude)}</span>
++            <span className="mag" style={{ background: magnitudeColor(e.magnitude) }}>{fmt.magnitude(e.magnitude)}</span>
+             <span className="feed-text">
+-              <span className="place">{placeLabel(e)}</span>
+-              <span className="meta">{formatDateTime(e.occurredAt)} &middot; Depth {formatDepth(e.depthKm)}</span>
++              {/* The place text comes straight from USGS and is shown exactly as received. */}
++              <span className="place">{fmt.place(e)}</span>
++              <span className="meta">{fmt.dateTime(e.occurredAt)} &middot; {t('feed.depth', { depth: fmt.depth(e.depthKm) })}</span>
+             </span>
+           </button>
+           {e.url && (
+-            <a className="ext" href={e.url} target="_blank" rel="noopener noreferrer">USGS event page</a>
++            <a className="ext" href={e.url} target="_blank" rel="noopener noreferrer">{t('feed.usgsLink')}</a>
+           )}
+         </li>
+       ))}
+diff --git a/src/components/LanguageSwitcher.tsx b/src/components/LanguageSwitcher.tsx
+new file mode 100644
+index 0000000..87aa71f
+--- /dev/null
++++ b/src/components/LanguageSwitcher.tsx
+@@ -0,0 +1,25 @@
++import { useLanguage } from '../i18n/LanguageContext';
++import { LANGUAGES } from '../i18n/translations';
++
++// Three real buttons: keyboard focusable, activated with Enter or Space, and the active one is announced
++// to screen readers (aria-pressed) as well as highlighted. Each button carries its own lang attribute so
++// the name is read and drawn in the right script, whatever language the page is in.
++export function LanguageSwitcher() {
++  const { language, setLanguage, t } = useLanguage();
++  return (
++    <div role="group" aria-label={t('language.label')} className="lang-switch">
++      {LANGUAGES.map((l) => (
++        <button
++          key={l.code}
++          type="button"
++          lang={l.code}
++          className="lang-btn"
++          aria-pressed={l.code === language}
++          onClick={() => setLanguage(l.code)}
++        >
++          {l.nativeName}
++        </button>
++      ))}
++    </div>
++  );
++}
+diff --git a/src/components/MapView.tsx b/src/components/MapView.tsx
+index a7263ff..3013bfc 100644
+--- a/src/components/MapView.tsx
++++ b/src/components/MapView.tsx
+@@ -1,12 +1,14 @@
+ import { useEffect, useMemo, useRef, useState } from 'react';
+-import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet';
++import { AttributionControl, CircleMarker, MapContainer, Popup, TileLayer, ZoomControl, useMap } from 'react-leaflet';
+ import 'leaflet/dist/leaflet.css';
+ import type { EarthquakeEvent } from '../types/events';
+ import { getRegion } from '../services/regions';
+ import type { RegionId } from '../services/regions';
+ import { TILE_ATTRIBUTION, TILE_REFERRER_POLICY, TILE_URL, onTileFailed, onTileLoaded, tileStatus } from '../lib/tiles';
+ import type { TileHealth } from '../lib/tiles';
+-import { formatDateTime, formatDepth, formatMagnitude, magnitudeColor, markerRadius, placeLabel } from '../lib/format';
++import { useLanguage } from '../i18n/LanguageContext';
++import { magnitudeColor, markerRadius } from '../lib/format';
++import { useFormat } from '../lib/useFormat';
+ 
+ function MapController({ region, selected }: { region: RegionId; selected: EarthquakeEvent | null }) {
+   const map = useMap();
+@@ -39,18 +41,21 @@ interface Props {
+ export function MapView({ events, region, selected, onSelect }: Props) {
+   // Draw big quakes first so small ones stay clickable on top.
+   const ordered = useMemo(() => [...events].sort((a, b) => (b.magnitude ?? 0) - (a.magnitude ?? 0)), [events]);
++  const { t, language } = useLanguage();
++  const fmt = useFormat();
+   const [tiles, setTiles] = useState<TileHealth>({ loaded: 0, failed: 0 });
+   const status = tileStatus(tiles);
+   const tileHandlers = useMemo(() => ({ tileload: () => setTiles(onTileLoaded), tileerror: () => setTiles(onTileFailed) }), []);
+   return (
+     <div className="map-wrap" data-tiles={status}>
+       {status === 'unavailable' && (
+-        <p className="banner info" role="status">
+-          The map background could not be loaded, so earthquakes are shown on a plain background. Their positions are
+-          still plotted at the real coordinates reported by USGS.
+-        </p>
++        <p className="banner info" role="status">{t('map.tilesUnavailable')}</p>
+       )}
+-      <MapContainer center={[20, 10]} zoom={2} minZoom={1} worldCopyJump className="map" scrollWheelZoom>
++      <MapContainer center={[20, 10]} zoom={2} minZoom={1} worldCopyJump className="map" scrollWheelZoom zoomControl={false} attributionControl={false}>
++        {/* Leaflet's built-in zoom buttons and credit text are English-only, so they are replaced with translated ones. */}
++        {/* key={language}: the zoom control only reads its titles when created, so it is re-created on a language change. */}
++        <ZoomControl key={language} position="topleft" zoomInTitle={t('map.zoomIn')} zoomOutTitle={t('map.zoomOut')} />
++        <AttributionControl prefix='<a href="https://leafletjs.com">Leaflet</a>' />
+         <TileLayer
+           attribution={TILE_ATTRIBUTION}
+           url={TILE_URL}
+@@ -73,15 +78,15 @@ export function MapView({ events, region, selected, onSelect }: Props) {
+           >
+             <Popup>
+               <div className="popup">
+-                <strong>{formatMagnitude(e.magnitude)}</strong> &middot; {placeLabel(e)}
++                <strong>{fmt.magnitude(e.magnitude)}</strong> &middot; {fmt.place(e)}
+                 <br />
+-                {formatDateTime(e.occurredAt)}
++                {fmt.dateTime(e.occurredAt)}
+                 <br />
+-                Depth: {formatDepth(e.depthKm)}
++                {t('map.popupDepth', { depth: fmt.depth(e.depthKm) })}
+                 {e.url && (
+                   <>
+                     <br />
+-                    <a href={e.url} target="_blank" rel="noopener noreferrer">USGS event page</a>
++                    <a href={e.url} target="_blank" rel="noopener noreferrer">{t('feed.usgsLink')}</a>
+                   </>
+                 )}
+               </div>
+@@ -89,17 +94,10 @@ export function MapView({ events, region, selected, onSelect }: Props) {
+           </CircleMarker>
+         ))}
+       </MapContainer>
+-      <p className="legend">
+-        Marker size and colour show reported magnitude: blue under 4, amber 4 to 4.9, orange 5 to 5.9, red 6 and above.
+-        Colours are a visual aid only, not a risk level.
+-      </p>
++      <p className="legend">{t('map.legend')}</p>
+       <details className="help">
+-        <summary>Map background not loading?</summary>
+-        <p>
+-          The background map comes from OpenStreetMap. If it shows an “Access blocked” image or stays blank, the page may
+-          be running inside an embedded preview, or behind a privacy tool that hides where the request comes from. Open the
+-          app in a normal browser tab. Earthquake markers are drawn at their true coordinates either way.
+-        </p>
++        <summary>{t('map.helpSummary')}</summary>
++        <p>{t('map.helpBody')}</p>
+       </details>
+     </div>
+   );
+diff --git a/src/components/RegionControls.tsx b/src/components/RegionControls.tsx
+index c1182d6..ba5a426 100644
+--- a/src/components/RegionControls.tsx
++++ b/src/components/RegionControls.tsx
+@@ -1,20 +1,30 @@
++import { useLanguage } from '../i18n/LanguageContext';
++import type { TranslationKey } from '../i18n/translations';
+ import { REGIONS } from '../services/regions';
+ import type { RegionId } from '../services/regions';
+ 
++const BUTTON_KEY: Record<RegionId, TranslationKey> = {
++  global: 'region.global.button',
++  bangladesh: 'region.bangladesh.button',
++  gujarat: 'region.gujarat.button',
++};
++export const REGION_NAME_KEY: Record<Exclude<RegionId, 'global'>, TranslationKey> = {
++  bangladesh: 'region.bangladesh.name',
++  gujarat: 'region.gujarat.name',
++};
++
+ export function RegionControls({ region, onChange }: { region: RegionId; onChange: (id: RegionId) => void }) {
++  const { t } = useLanguage();
+   return (
+     <div className="region-controls">
+-      <div role="group" aria-label="Region" className="btn-row">
++      <div role="group" aria-label={t('region.label')} className="btn-row">
+         {REGIONS.map((r) => (
+           <button key={r.id} className="chip" aria-pressed={r.id === region} onClick={() => onChange(r.id)}>
+-            {r.label}
++            {t(BUTTON_KEY[r.id])}
+           </button>
+         ))}
+       </div>
+-      <p className="note">
+-        Regional views use rough rectangular search areas to centre the map and filter events. They are not official
+-        administrative boundaries.
+-      </p>
++      <p className="note">{t('region.note')}</p>
+     </div>
+   );
+ }
+diff --git a/src/hooks/useEarthquakeFeed.ts b/src/hooks/useEarthquakeFeed.ts
+index 9702fc9..0f78e36 100644
+--- a/src/hooks/useEarthquakeFeed.ts
++++ b/src/hooks/useEarthquakeFeed.ts
+@@ -1,5 +1,7 @@
+ import { useCallback, useEffect, useRef, useState } from 'react';
+ import { activeProvider } from '../services/providers';
++import { ProviderError } from '../types/events';
++import type { FeedErrorKind } from '../lib/errors';
+ import type { EventProvider, FeedSnapshot } from '../types/events';
+ 
+ export const REFRESH_INTERVAL_MS = 60_000;
+@@ -10,6 +12,7 @@ export type FeedStatus = 'loading' | 'live' | 'stale' | 'unavailable';
+ export function useEarthquakeFeed(provider: EventProvider = activeProvider, intervalMs = REFRESH_INTERVAL_MS) {
+   const [snapshot, setSnapshot] = useState<FeedSnapshot | null>(null); // last GOOD data only
+   const [error, setError] = useState<string | null>(null);
++  const [errorInfo, setErrorInfo] = useState<{ kind: FeedErrorKind; status: number | null } | null>(null);
+   const [failures, setFailures] = useState(0);
+   const [isFetching, setIsFetching] = useState(true);
+   const inFlight = useRef<AbortController | null>(null);
+@@ -24,10 +27,12 @@ export function useEarthquakeFeed(provider: EventProvider = activeProvider, inte
+       if (controller.signal.aborted) return;
+       setSnapshot(next);
+       setError(null);
++      setErrorInfo(null);
+       setFailures(0);
+     } catch (err) {
+       if (controller.signal.aborted) return;
+       setError(err instanceof Error ? err.message : 'Unknown error while loading data.');
++      setErrorInfo(err instanceof ProviderError ? { kind: err.kind, status: err.status ?? null } : { kind: 'unknown', status: null });
+       setFailures((n) => n + 1);
+     } finally {
+       if (inFlight.current === controller) inFlight.current = null;
+@@ -49,5 +54,9 @@ export function useEarthquakeFeed(provider: EventProvider = activeProvider, inte
+   if (!snapshot) status = error ? 'unavailable' : 'loading';
+   else status = failures >= STALE_AFTER_FAILURES ? 'stale' : 'live';
+ 
+-  return { snapshot, status, error, failures, isFetching, refresh: load, intervalMs };
++  return {
++    snapshot, status, error, failures, isFetching, refresh: load, intervalMs,
++    errorKind: errorInfo?.kind ?? null, // language-independent reason, for the UI to translate
++    errorStatus: errorInfo?.status ?? null,
++  };
+ }
+diff --git a/src/i18n/LanguageContext.tsx b/src/i18n/LanguageContext.tsx
+new file mode 100644
+index 0000000..cbf9f20
+--- /dev/null
++++ b/src/i18n/LanguageContext.tsx
+@@ -0,0 +1,92 @@
++import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
++import type { ReactNode } from 'react';
++import { DEFAULT_LANGUAGE, isLanguage, translate } from './translations';
++import type { Language, TFunction } from './translations';
++
++export const LANGUAGE_STORAGE_KEY = 'banguj.language';
++
++type ReadableStorage = Pick<Storage, 'getItem'>;
++type WritableStorage = Pick<Storage, 'setItem'>;
++
++/** The browser's localStorage, or null on the server or when the browser blocks it (reading it can throw). */
++function browserStorage(): Storage | null {
++  if (typeof window === 'undefined') return null;
++  try {
++    return window.localStorage;
++  } catch {
++    return null;
++  }
++}
++
++/** The saved language, or English if nothing valid is saved or storage is unavailable. Never throws. */
++export function readStoredLanguage(storage: ReadableStorage | null = browserStorage()): Language {
++  if (!storage) return DEFAULT_LANGUAGE;
++  try {
++    const value = storage.getItem(LANGUAGE_STORAGE_KEY);
++    return isLanguage(value) ? value : DEFAULT_LANGUAGE;
++  } catch {
++    return DEFAULT_LANGUAGE;
++  }
++}
++
++/** Save the language. Returns false (and does not throw) if storage is unavailable or full. */
++export function storeLanguage(language: Language, storage: WritableStorage | null = browserStorage()): boolean {
++  if (!storage) return false;
++  try {
++    storage.setItem(LANGUAGE_STORAGE_KEY, language);
++    return true;
++  } catch {
++    return false;
++  }
++}
++
++export interface LanguageContextValue {
++  language: Language;
++  setLanguage: (language: Language) => void;
++  t: TFunction;
++}
++
++// Without a provider (for example a component rendered on its own in a test) everything still works in English.
++const fallback: LanguageContextValue = {
++  language: DEFAULT_LANGUAGE,
++  setLanguage: () => {},
++  t: (key, params) => translate(DEFAULT_LANGUAGE, key, params),
++};
++const LanguageContext = createContext<LanguageContextValue>(fallback);
++
++interface ProviderProps {
++  children?: ReactNode;
++  /** Overrides the saved language. Mainly for tests. */
++  initialLanguage?: Language;
++  /** Where to save the choice. Defaults to the browser's localStorage. */
++  storage?: (ReadableStorage & WritableStorage) | null;
++}
++
++export function LanguageProvider({ children, initialLanguage, storage }: ProviderProps) {
++  const [language, setLanguageState] = useState<Language>(() =>
++    initialLanguage ?? (storage === undefined ? readStoredLanguage() : readStoredLanguage(storage)),
++  );
++
++  const setLanguage = useCallback(
++    (next: Language) => {
++      if (!isLanguage(next)) return; // ignore anything that is not a supported language
++      setLanguageState(next);
++      if (storage === undefined) storeLanguage(next);
++      else storeLanguage(next, storage);
++    },
++    [storage],
++  );
++
++  // Tell the browser and screen readers which language the page is in.
++  useEffect(() => {
++    if (typeof document !== 'undefined') document.documentElement.lang = language;
++  }, [language]);
++
++  const t = useCallback<TFunction>((key, params) => translate(language, key, params), [language]);
++  const value = useMemo(() => ({ language, setLanguage, t }), [language, setLanguage, t]);
++  return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
++}
++
++export function useLanguage(): LanguageContextValue {
++  return useContext(LanguageContext);
++}
+diff --git a/src/i18n/translations.ts b/src/i18n/translations.ts
+new file mode 100644
+index 0000000..43fff9f
+--- /dev/null
++++ b/src/i18n/translations.ts
+@@ -0,0 +1,345 @@
++// All user-facing interface text, in three languages.
++//
++// The English dictionary is the source of truth: the TranslationKey type is derived from it, and the Bengali
++// and Gujarati dictionaries are typed as Record<TranslationKey, string>, so a missing OR extra key is a
++// compile-time error.
++//
++// Not translated on purpose: proper nouns (BANGUJ Bridge, USGS, OpenStreetMap, names of planned data sources) and
++// raw data from the USGS feed (place names, event IDs).
++//
++// IMPORTANT: the Bengali and Gujarati text below is a DRAFT written by an AI assistant. A native speaker must
++// review it, especially the safety disclaimers (footer.text, details.disclaimer, verify.body), before public use.
++
++export type Language = 'en' | 'bn' | 'gu';
++export const DEFAULT_LANGUAGE: Language = 'en';
++
++export const LANGUAGES: ReadonlyArray<{ code: Language; nativeName: string; locale: string }> = [
++  { code: 'en', nativeName: 'English', locale: 'en' },
++  { code: 'bn', nativeName: 'বাংলা', locale: 'bn-BD' },
++  { code: 'gu', nativeName: 'ગુજરાતી', locale: 'gu-IN' },
++];
++export const isLanguage = (value: unknown): value is Language =>
++  typeof value === 'string' && LANGUAGES.some((l) => l.code === value);
++export const localeFor = (language: Language): string => LANGUAGES.find((l) => l.code === language)?.locale ?? 'en';
++
++export const en = {
++  'app.name': 'BANGUJ Bridge',
++  'language.label': 'Language',
++
++  'nav.sections': 'Sections',
++  'nav.liveMap': 'Live Map',
++  'nav.eventFeed': 'Event Feed',
++  'nav.verify': 'Bilingual Alert Verification',
++  'nav.sources': 'Sources and Data Health',
++
++  'header.lastRefresh': 'Last successful refresh: {time}',
++  'header.noRefreshYet': 'none yet',
++
++  'status.loading': 'Connecting to USGS',
++  'status.live': 'Connected to USGS',
++  'status.stale': 'Stale: refreshes are failing',
++  'status.unavailable': 'Unavailable: could not load USGS data',
++
++  'banner.stale': 'Showing stale data. The last successful fetch was {time}, and recent refreshes have failed. These events may be out of date.',
++  'banner.unavailable': 'Earthquake data is unavailable. BANGUJ Bridge could not load the USGS feed ({reason}). No events are shown. It will retry every {seconds} seconds.',
++
++  'error.network': 'Could not reach the USGS feed.',
++  'error.http': 'The USGS feed returned HTTP error {status}.',
++  'error.invalidJson': 'The USGS feed returned invalid data (not valid JSON).',
++  'error.invalidFormat': 'The USGS response was not in the expected format.',
++  'error.unknown': 'An unknown error occurred while loading data.',
++
++  'region.label': 'Region',
++  'region.global.button': 'Global view',
++  'region.bangladesh.button': 'Bangladesh view',
++  'region.gujarat.button': 'Gujarat, India view',
++  'region.bangladesh.name': 'Bangladesh',
++  'region.gujarat.name': 'Gujarat, India',
++  'region.note': 'Regional views use rough rectangular search areas to centre the map and filter events. They are not official administrative boundaries.',
++  'region.emptyNotice': 'No earthquakes of magnitude 2.5 or higher in the USGS past-7-days feed fall inside the approximate {region} search area.',
++
++  'feed.title': 'Latest earthquakes',
++  'feed.titleCount': 'Latest earthquakes ({count})',
++  'feed.loading': 'Loading earthquake reports from USGS...',
++  'feed.unavailable': 'No data to show because the USGS feed is unavailable.',
++  'feed.empty': 'No events to show.',
++  'feed.depth': 'Depth {depth}',
++  'feed.usgsLink': 'USGS event page',
++
++  'details.title': 'Event details',
++  'details.selectPrompt': 'Select a marker on the map or an event in the feed to see its details.',
++  'details.eventTime': 'Event time',
++  'details.updated': 'Last updated by USGS',
++  'details.depth': 'Depth',
++  'details.latitude': 'Latitude',
++  'details.longitude': 'Longitude',
++  'details.eventId': 'USGS event ID',
++  'details.openOfficial': 'Open official USGS event page',
++  'details.disclaimer': 'This is an observed earthquake report from USGS. It is not a forecast and not an official evacuation instruction.',
++
++  'event.placeMissing': 'Location description not provided',
++  'common.notProvided': 'Not provided',
++  'common.notAvailable': 'Not available',
++  'common.magnitudeMissing': 'n/a',
++
++  'map.legend': 'Marker size and colour show reported magnitude: blue under 4, amber 4 to 4.9, orange 5 to 5.9, red 6 and above. Colours are a visual aid only, not a risk level.',
++  'map.tilesUnavailable': 'The map background could not be loaded, so earthquakes are shown on a plain background. Their positions are still plotted at the real coordinates reported by USGS.',
++  'map.helpSummary': 'Map background not loading?',
++  'map.helpBody': 'The background map comes from OpenStreetMap. If it shows an “Access blocked” image or stays blank, the page may be running inside an embedded preview, or behind a privacy tool that hides where the request comes from. Open the app in a normal browser tab. Earthquake markers are drawn at their true coordinates either way.',
++  'map.zoomIn': 'Zoom in',
++  'map.zoomOut': 'Zoom out',
++  'map.popupDepth': 'Depth: {depth}',
++
++  'health.title': 'Data health',
++  'health.connection': 'Connection',
++  'health.lastFetch': 'Last successful fetch',
++  'health.noFetchYet': 'No successful fetch yet',
++  'health.generated': 'Feed generated by USGS',
++  'health.received': 'Events received',
++  'health.inView': 'Events in this view',
++  'health.skipped': 'Records skipped',
++  'health.skippedValue': '{count} (missing or invalid data)',
++  'health.autoRefresh': 'Automatic refresh',
++  'health.autoRefreshValue': 'Every {seconds} seconds while this page is open',
++  'health.refreshFailed': 'Latest refresh failed: {reason} ({count} in a row)',
++  'health.refreshNow': 'Refresh now',
++  'health.refreshing': 'Refreshing...',
++
++  'verify.badge': 'Planned, not implemented',
++  'verify.body': 'A future milestone will compare Bengali and Gujarati versions of important public notices and check whether meaning, dates, times, locations, instructions and negation agree. No verification feature or AI model exists in this version.',
++
++  'sources.activeTitle': 'Active source',
++  'sources.name': 'USGS Earthquake Hazards Program',
++  'sources.activeDesc': 'Magnitude 2.5+ earthquakes worldwide over the past seven days, read directly from the public feed. USGS data is public information from the U.S. Geological Survey.',
++  'sources.feedLink': 'Open the USGS GeoJSON summary feed',
++  'sources.tilesLabel': 'Map tiles',
++  'sources.plannedTitle': 'Planned sources (not connected)',
++  'sources.plannedBadge': 'Planned',
++  'planned.gdacs': 'Global disaster alerts',
++  'planned.ffwc': 'Flood forecasting and warning',
++  'planned.imd': 'Weather and cyclone bulletins',
++  'planned.openMeteo': 'Weather data',
++  'planned.gdelt': 'News and media monitoring',
++
++  'footer.text': 'Source: USGS Earthquake Hazards Program. BANGUJ Bridge shows observed earthquake reports only. It does not predict earthquakes and does not issue official warnings or evacuation instructions. For official guidance, follow your national and local authorities.',
++} as const;
++
++export type TranslationKey = keyof typeof en;
++export type Dictionary = Record<TranslationKey, string>;
++export type TranslationParams = Record<string, string | number>;
++export type TFunction = (key: TranslationKey, params?: TranslationParams) => string;
++
++// DRAFT: needs native-speaker review.
++const bn: Dictionary = {
++  'app.name': 'BANGUJ Bridge',
++  'language.label': 'ভাষা',
++
++  'nav.sections': 'বিভাগসমূহ',
++  'nav.liveMap': 'লাইভ মানচিত্র',
++  'nav.eventFeed': 'ঘটনার তালিকা',
++  'nav.verify': 'দ্বিভাষিক সতর্কবার্তা যাচাই',
++  'nav.sources': 'উৎস ও তথ্যের অবস্থা',
++
++  'header.lastRefresh': 'সর্বশেষ সফল হালনাগাদ: {time}',
++  'header.noRefreshYet': 'এখনও হয়নি',
++
++  'status.loading': 'USGS-এর সঙ্গে সংযোগ হচ্ছে',
++  'status.live': 'USGS-এর সঙ্গে সংযুক্ত',
++  'status.stale': 'পুরোনো তথ্য: হালনাগাদ ব্যর্থ হচ্ছে',
++  'status.unavailable': 'পাওয়া যাচ্ছে না: USGS-এর তথ্য লোড করা যায়নি',
++
++  'banner.stale': 'পুরোনো তথ্য দেখানো হচ্ছে। সর্বশেষ সফলভাবে তথ্য আনা হয়েছিল {time}-এ, এবং সাম্প্রতিক হালনাগাদগুলো ব্যর্থ হয়েছে। এই ঘটনাগুলো হালনাগাদ নাও হতে পারে।',
++  'banner.unavailable': 'ভূমিকম্পের তথ্য পাওয়া যাচ্ছে না। BANGUJ Bridge USGS-এর ফিড লোড করতে পারেনি ({reason})। কোনো ঘটনা দেখানো হচ্ছে না। প্রতি {seconds} সেকেন্ডে আবার চেষ্টা করা হবে।',
++
++  'error.network': 'USGS-এর ফিডে পৌঁছানো যায়নি।',
++  'error.http': 'USGS-এর ফিড HTTP ত্রুটি {status} ফেরত দিয়েছে।',
++  'error.invalidJson': 'USGS-এর ফিড অবৈধ তথ্য (সঠিক JSON নয়) ফেরত দিয়েছে।',
++  'error.invalidFormat': 'USGS-এর উত্তর প্রত্যাশিত ফরম্যাটে ছিল না।',
++  'error.unknown': 'তথ্য লোড করার সময় একটি অজানা ত্রুটি ঘটেছে।',
++
++  'region.label': 'অঞ্চল',
++  'region.global.button': 'সারা বিশ্ব',
++  'region.bangladesh.button': 'বাংলাদেশ',
++  'region.gujarat.button': 'গুজরাট, ভারত',
++  'region.bangladesh.name': 'বাংলাদেশ',
++  'region.gujarat.name': 'গুজরাট, ভারত',
++  'region.note': 'অঞ্চলভিত্তিক দৃশ্যে মানচিত্রের কেন্দ্র ঠিক করতে ও ঘটনা বাছাই করতে মোটামুটি আয়তাকার অনুসন্ধান এলাকা ব্যবহার করা হয়। এগুলো সরকারি প্রশাসনিক সীমানা নয়।',
++  'region.emptyNotice': 'USGS-এর গত ৭ দিনের ফিডে {region}ের আনুমানিক অনুসন্ধান এলাকার মধ্যে ২.৫ বা তার বেশি মাত্রার কোনো ভূমিকম্প নেই।',
++
++  'feed.title': 'সাম্প্রতিক ভূমিকম্প',
++  'feed.titleCount': 'সাম্প্রতিক ভূমিকম্প ({count})',
++  'feed.loading': 'USGS থেকে ভূমিকম্পের প্রতিবেদন লোড হচ্ছে...',
++  'feed.unavailable': 'USGS-এর ফিড পাওয়া যাচ্ছে না, তাই দেখানোর মতো তথ্য নেই।',
++  'feed.empty': 'দেখানোর মতো কোনো ঘটনা নেই।',
++  'feed.depth': 'গভীরতা {depth}',
++  'feed.usgsLink': 'USGS ঘটনার পাতা',
++
++  'details.title': 'ঘটনার বিবরণ',
++  'details.selectPrompt': 'বিবরণ দেখতে মানচিত্রের একটি চিহ্ন বা তালিকার একটি ঘটনা বেছে নিন।',
++  'details.eventTime': 'ঘটনার সময়',
++  'details.updated': 'USGS-এর সর্বশেষ হালনাগাদ',
++  'details.depth': 'গভীরতা',
++  'details.latitude': 'অক্ষাংশ',
++  'details.longitude': 'দ্রাঘিমাংশ',
++  'details.eventId': 'USGS ঘটনার আইডি',
++  'details.openOfficial': 'USGS-এর অফিসিয়াল ঘটনার পাতা খুলুন',
++  'details.disclaimer': 'এটি USGS-এর একটি পর্যবেক্ষিত ভূমিকম্প প্রতিবেদন। এটি কোনো পূর্বাভাস নয় এবং অফিসিয়াল সরিয়ে নেওয়ার নির্দেশনাও নয়।',
++
++  'event.placeMissing': 'স্থানের বিবরণ দেওয়া হয়নি',
++  'common.notProvided': 'দেওয়া হয়নি',
++  'common.notAvailable': 'পাওয়া যায়নি',
++  'common.magnitudeMissing': 'অজানা',
++
++  'map.legend': 'চিহ্নের আকার ও রং রিপোর্ট করা মাত্রা বোঝায়: ৪-এর কম নীল, ৪ থেকে ৪.৯ হলুদ, ৫ থেকে ৫.৯ কমলা, ৬ ও তার বেশি লাল। রংগুলো কেবল দৃশ্যগত সহায়তা, ঝুঁকির মাত্রা নয়।',
++  'map.tilesUnavailable': 'মানচিত্রের পটভূমি লোড করা যায়নি, তাই ভূমিকম্পগুলো সাদামাটা পটভূমিতে দেখানো হচ্ছে। USGS-এর দেওয়া প্রকৃত স্থানাঙ্কেই এগুলো বসানো আছে।',
++  'map.helpSummary': 'মানচিত্রের পটভূমি লোড হচ্ছে না?',
++  'map.helpBody': 'পটভূমির মানচিত্র আসে OpenStreetMap থেকে। এটি যদি “Access blocked” লেখা ছবি দেখায় বা ফাঁকা থাকে, তবে পাতাটি হয়তো কোনো এমবেডেড প্রিভিউয়ের ভেতরে চলছে, অথবা কোনো গোপনীয়তা-সুরক্ষা টুল অনুরোধের উৎস লুকিয়ে রাখছে। অ্যাপটি একটি সাধারণ ব্রাউজার ট্যাবে খুলুন। পটভূমি থাকুক বা না থাকুক, ভূমিকম্পের চিহ্নগুলো প্রকৃত স্থানাঙ্কেই আঁকা হয়।',
++  'map.zoomIn': 'বড় করুন',
++  'map.zoomOut': 'ছোট করুন',
++  'map.popupDepth': 'গভীরতা: {depth}',
++
++  'health.title': 'তথ্যের অবস্থা',
++  'health.connection': 'সংযোগ',
++  'health.lastFetch': 'সর্বশেষ সফল তথ্য সংগ্রহ',
++  'health.noFetchYet': 'এখনও সফলভাবে তথ্য আনা হয়নি',
++  'health.generated': 'USGS ফিড তৈরির সময়',
++  'health.received': 'প্রাপ্ত ঘটনা',
++  'health.inView': 'এই দৃশ্যে ঘটনা',
++  'health.skipped': 'বাদ দেওয়া রেকর্ড',
++  'health.skippedValue': '{count} (তথ্য অনুপস্থিত বা অবৈধ)',
++  'health.autoRefresh': 'স্বয়ংক্রিয় হালনাগাদ',
++  'health.autoRefreshValue': 'এই পাতা খোলা থাকলে প্রতি {seconds} সেকেন্ডে',
++  'health.refreshFailed': 'সর্বশেষ হালনাগাদ ব্যর্থ হয়েছে: {reason} (পরপর {count} বার)',
++  'health.refreshNow': 'এখনই হালনাগাদ করুন',
++  'health.refreshing': 'হালনাগাদ হচ্ছে...',
++
++  'verify.badge': 'পরিকল্পিত, এখনও তৈরি হয়নি',
++  'verify.body': 'ভবিষ্যতের একটি ধাপে গুরুত্বপূর্ণ জনবিজ্ঞপ্তির বাংলা ও গুজরাটি সংস্করণ তুলনা করা হবে এবং অর্থ, তারিখ, সময়, স্থান, নির্দেশনা ও নেতিবাচক বাক্য মিলছে কি না যাচাই করা হবে। এই সংস্করণে কোনো যাচাই-সুবিধা বা এআই মডেল নেই।',
++
++  'sources.activeTitle': 'বর্তমান উৎস',
++  'sources.name': 'USGS Earthquake Hazards Program',
++  'sources.activeDesc': 'গত সাত দিনে বিশ্বজুড়ে ২.৫ বা তার বেশি মাত্রার ভূমিকম্প, সরাসরি প্রকাশ্য ফিড থেকে পড়া হয়। USGS-এর তথ্য যুক্তরাষ্ট্রের ভূতাত্ত্বিক জরিপ সংস্থার প্রকাশ্য তথ্য।',
++  'sources.feedLink': 'USGS GeoJSON সারাংশ ফিড খুলুন',
++  'sources.tilesLabel': 'মানচিত্রের টাইল',
++  'sources.plannedTitle': 'পরিকল্পিত উৎস (এখনও সংযুক্ত নয়)',
++  'sources.plannedBadge': 'পরিকল্পিত',
++  'planned.gdacs': 'বৈশ্বিক দুর্যোগ সতর্কতা',
++  'planned.ffwc': 'বন্যা পূর্বাভাস ও সতর্কীকরণ',
++  'planned.imd': 'আবহাওয়া ও ঘূর্ণিঝড়ের বুলেটিন',
++  'planned.openMeteo': 'আবহাওয়ার তথ্য',
++  'planned.gdelt': 'সংবাদ ও গণমাধ্যম পর্যবেক্ষণ',
++
++  'footer.text': 'উৎস: USGS Earthquake Hazards Program। BANGUJ Bridge শুধু পর্যবেক্ষিত ভূমিকম্পের প্রতিবেদন দেখায়। এটি ভূমিকম্পের পূর্বাভাস দেয় না এবং কোনো সরকারি সতর্কতা বা সরিয়ে নেওয়ার নির্দেশনাও দেয় না। অফিসিয়াল নির্দেশনার জন্য আপনার জাতীয় ও স্থানীয় কর্তৃপক্ষের কথা অনুসরণ করুন।',
++};
++
++// DRAFT: needs native-speaker review.
++const gu: Dictionary = {
++  'app.name': 'BANGUJ Bridge',
++  'language.label': 'ભાષા',
++
++  'nav.sections': 'વિભાગો',
++  'nav.liveMap': 'લાઇવ નકશો',
++  'nav.eventFeed': 'ઘટનાઓની યાદી',
++  'nav.verify': 'દ્વિભાષી ચેતવણી ચકાસણી',
++  'nav.sources': 'સ્ત્રોતો અને ડેટા સ્થિતિ',
++
++  'header.lastRefresh': 'છેલ્લું સફળ અપડેટ: {time}',
++  'header.noRefreshYet': 'હજુ સુધી નથી',
++
++  'status.loading': 'USGS સાથે જોડાઈ રહ્યું છે',
++  'status.live': 'USGS સાથે જોડાયેલ છે',
++  'status.stale': 'જૂનો ડેટા: અપડેટ નિષ્ફળ થઈ રહ્યા છે',
++  'status.unavailable': 'ઉપલબ્ધ નથી: USGS નો ડેટા લોડ થઈ શક્યો નથી',
++
++  'banner.stale': 'જૂનો ડેટા બતાવાઈ રહ્યો છે. છેલ્લે સફળતાપૂર્વક ડેટા {time} એ મેળવવામાં આવ્યો હતો, અને તાજેતરના અપડેટ નિષ્ફળ ગયા છે. આ ઘટનાઓ કદાચ તાજી ન હોય.',
++  'banner.unavailable': 'ભૂકંપનો ડેટા ઉપલબ્ધ નથી. BANGUJ Bridge USGS ફીડ લોડ કરી શક્યું નથી ({reason}). કોઈ ઘટના બતાવાતી નથી. દર {seconds} સેકન્ડે ફરી પ્રયાસ કરવામાં આવશે.',
++
++  'error.network': 'USGS ફીડ સુધી પહોંચી શકાયું નથી.',
++  'error.http': 'USGS ફીડે HTTP ભૂલ {status} પાછી આપી.',
++  'error.invalidJson': 'USGS ફીડે અમાન્ય ડેટા (માન્ય JSON નથી) પાછો આપ્યો.',
++  'error.invalidFormat': 'USGS નો પ્રતિભાવ અપેક્ષિત ફોર્મેટમાં ન હતો.',
++  'error.unknown': 'ડેટા લોડ કરતી વખતે અજ્ઞાત ભૂલ થઈ.',
++
++  'region.label': 'પ્રદેશ',
++  'region.global.button': 'આખું વિશ્વ',
++  'region.bangladesh.button': 'બાંગ્લાદેશ',
++  'region.gujarat.button': 'ગુજરાત, ભારત',
++  'region.bangladesh.name': 'બાંગ્લાદેશ',
++  'region.gujarat.name': 'ગુજરાત, ભારત',
++  'region.note': 'પ્રાદેશિક દૃશ્યોમાં નકશાને કેન્દ્રિત કરવા અને ઘટનાઓ ગાળવા માટે આશરે લંબચોરસ શોધ વિસ્તારનો ઉપયોગ થાય છે. તે સત્તાવાર વહીવટી સીમાઓ નથી.',
++  'region.emptyNotice': 'USGS ના છેલ્લા 7 દિવસના ફીડમાં {region}ના અંદાજિત શોધ વિસ્તારમાં 2.5 કે તેથી વધુ તીવ્રતાનો કોઈ ભૂકંપ નથી.',
++
++  'feed.title': 'તાજેતરના ભૂકંપ',
++  'feed.titleCount': 'તાજેતરના ભૂકંપ ({count})',
++  'feed.loading': 'USGS પાસેથી ભૂકંપના અહેવાલ લોડ થઈ રહ્યા છે...',
++  'feed.unavailable': 'USGS ફીડ ઉપલબ્ધ ન હોવાથી બતાવવા માટે કોઈ ડેટા નથી.',
++  'feed.empty': 'બતાવવા માટે કોઈ ઘટના નથી.',
++  'feed.depth': 'ઊંડાઈ {depth}',
++  'feed.usgsLink': 'USGS ઘટના પૃષ્ઠ',
++
++  'details.title': 'ઘટનાની વિગતો',
++  'details.selectPrompt': 'વિગતો જોવા માટે નકશા પરનું ચિહ્ન અથવા યાદીમાંની કોઈ ઘટના પસંદ કરો.',
++  'details.eventTime': 'ઘટનાનો સમય',
++  'details.updated': 'USGS દ્વારા છેલ્લું અપડેટ',
++  'details.depth': 'ઊંડાઈ',
++  'details.latitude': 'અક્ષાંશ',
++  'details.longitude': 'રેખાંશ',
++  'details.eventId': 'USGS ઘટના આઈડી',
++  'details.openOfficial': 'USGS નું સત્તાવાર ઘટના પૃષ્ઠ ખોલો',
++  'details.disclaimer': 'આ USGS તરફથી નોંધાયેલો ભૂકંપનો અહેવાલ છે. તે આગાહી નથી અને સત્તાવાર સ્થળાંતરની સૂચના પણ નથી.',
++
++  'event.placeMissing': 'સ્થળનું વર્ણન આપવામાં આવ્યું નથી',
++  'common.notProvided': 'આપેલ નથી',
++  'common.notAvailable': 'ઉપલબ્ધ નથી',
++  'common.magnitudeMissing': 'અજ્ઞાત',
++
++  'map.legend': 'ચિહ્નનું કદ અને રંગ નોંધાયેલી તીવ્રતા દર્શાવે છે: 4 થી ઓછી વાદળી, 4 થી 4.9 પીળી, 5 થી 5.9 નારંગી, 6 અને તેથી વધુ લાલ. રંગો ફક્ત દૃશ્ય સહાય છે, જોખમનું સ્તર નથી.',
++  'map.tilesUnavailable': 'નકશાની પૃષ્ઠભૂમિ લોડ થઈ શકી નથી, તેથી ભૂકંપ સાદી પૃષ્ઠભૂમિ પર બતાવાયા છે. USGS એ આપેલા વાસ્તવિક સ્થાન-નિર્દેશાંકો પર જ તે દર્શાવાયા છે.',
++  'map.helpSummary': 'નકશાની પૃષ્ઠભૂમિ લોડ થતી નથી?',
++  'map.helpBody': 'પૃષ્ઠભૂમિનો નકશો OpenStreetMap પરથી આવે છે. જો તે “Access blocked” લખેલી છબી બતાવે અથવા ખાલી રહે, તો પેજ કદાચ કોઈ એમ્બેડેડ પ્રિવ્યૂની અંદર ચાલી રહ્યું છે, અથવા કોઈ પ્રાઇવસી ટૂલ વિનંતીનો સ્ત્રોત છુપાવી રહ્યું છે. એપ્લિકેશનને સામાન્ય બ્રાઉઝર ટેબમાં ખોલો. પૃષ્ઠભૂમિ હોય કે ન હોય, ભૂકંપના ચિહ્નો વાસ્તવિક સ્થાન પર જ દોરાય છે.',
++  'map.zoomIn': 'મોટું કરો',
++  'map.zoomOut': 'નાનું કરો',
++  'map.popupDepth': 'ઊંડાઈ: {depth}',
++
++  'health.title': 'ડેટા સ્થિતિ',
++  'health.connection': 'જોડાણ',
++  'health.lastFetch': 'છેલ્લી સફળ ડેટા પ્રાપ્તિ',
++  'health.noFetchYet': 'હજુ સુધી કોઈ સફળ ડેટા પ્રાપ્તિ થઈ નથી',
++  'health.generated': 'USGS ફીડ બનાવ્યાનો સમય',
++  'health.received': 'પ્રાપ્ત ઘટનાઓ',
++  'health.inView': 'આ દૃશ્યમાં ઘટનાઓ',
++  'health.skipped': 'છોડી દીધેલા રેકોર્ડ',
++  'health.skippedValue': '{count} (માહિતી ખૂટે છે અથવા અમાન્ય છે)',
++  'health.autoRefresh': 'આપમેળે અપડેટ',
++  'health.autoRefreshValue': 'આ પેજ ખુલ્લું હોય ત્યારે દર {seconds} સેકન્ડે',
++  'health.refreshFailed': 'છેલ્લું અપડેટ નિષ્ફળ ગયું: {reason} (સતત {count} વખત)',
++  'health.refreshNow': 'હમણાં અપડેટ કરો',
++  'health.refreshing': 'અપડેટ થઈ રહ્યું છે...',
++
++  'verify.badge': 'આયોજિત, હજુ બનાવાયું નથી',
++  'verify.body': 'ભવિષ્યના તબક્કામાં મહત્વપૂર્ણ જાહેર સૂચનાઓના બંગાળી અને ગુજરાતી સંસ્કરણોની સરખામણી કરવામાં આવશે અને અર્થ, તારીખો, સમય, સ્થળો, સૂચનાઓ અને નકારાત્મક વાક્યો મેળ ખાય છે કે નહીં તે તપાસવામાં આવશે. આ સંસ્કરણમાં કોઈ ચકાસણી સુવિધા કે એઆઈ મોડેલ નથી.',
++
++  'sources.activeTitle': 'હાલનો સ્ત્રોત',
++  'sources.name': 'USGS Earthquake Hazards Program',
++  'sources.activeDesc': 'છેલ્લા સાત દિવસમાં વિશ્વભરના 2.5 કે તેથી વધુ તીવ્રતાના ભૂકંપ, સીધા જાહેર ફીડમાંથી વાંચવામાં આવે છે. USGS નો ડેટા અમેરિકાના ભૂસ્તરીય સર્વેક્ષણની જાહેર માહિતી છે.',
++  'sources.feedLink': 'USGS GeoJSON સારાંશ ફીડ ખોલો',
++  'sources.tilesLabel': 'નકશાની ટાઇલ્સ',
++  'sources.plannedTitle': 'આયોજિત સ્ત્રોતો (હજુ જોડાયેલા નથી)',
++  'sources.plannedBadge': 'આયોજિત',
++  'planned.gdacs': 'વૈશ્વિક આપત્તિ ચેતવણીઓ',
++  'planned.ffwc': 'પૂરની આગાહી અને ચેતવણી',
++  'planned.imd': 'હવામાન અને વાવાઝોડાના બુલેટિન',
++  'planned.openMeteo': 'હવામાન ડેટા',
++  'planned.gdelt': 'સમાચાર અને મીડિયા દેખરેખ',
++
++  'footer.text': 'સ્ત્રોત: USGS Earthquake Hazards Program. BANGUJ Bridge ફક્ત નોંધાયેલા ભૂકંપના અહેવાલ બતાવે છે. તે ભૂકંપની આગાહી કરતું નથી અને કોઈ સત્તાવાર ચેતવણી કે સ્થળાંતરની સૂચના આપતું નથી. સત્તાવાર માર્ગદર્શન માટે તમારા રાષ્ટ્રીય અને સ્થાનિક સત્તાવાળાઓને અનુસરો.',
++};
++
++export const translations: Record<Language, Dictionary> = { en, bn, gu };
++
++/** Look up a string and fill in {placeholders}. Falls back to English if a key is somehow missing. */
++export function translate(language: Language, key: TranslationKey, params?: TranslationParams): string {
++  const template = translations[language]?.[key] ?? en[key];
++  if (!params) return template;
++  return template.replace(/\{(\w+)\}/g, (whole, name: string) => (name in params ? String(params[name]) : whole));
++}
+diff --git a/src/lib/errors.ts b/src/lib/errors.ts
+new file mode 100644
+index 0000000..5524e66
+--- /dev/null
++++ b/src/lib/errors.ts
+@@ -0,0 +1,14 @@
++import type { TFunction } from '../i18n/translations';
++
++export type FeedErrorKind = 'network' | 'http' | 'invalid-json' | 'invalid-format' | 'unknown';
++
++/** A translated, human-readable reason for a failed feed refresh. */
++export function describeFeedError(t: TFunction, kind: FeedErrorKind, status?: number | null): string {
++  switch (kind) {
++    case 'network': return t('error.network');
++    case 'http': return t('error.http', { status: status ?? '?' });
++    case 'invalid-json': return t('error.invalidJson');
++    case 'invalid-format': return t('error.invalidFormat');
++    default: return t('error.unknown');
++  }
++}
+diff --git a/src/lib/format.ts b/src/lib/format.ts
+index 830d7c5..bac7ef4 100644
+--- a/src/lib/format.ts
++++ b/src/lib/format.ts
+@@ -1,3 +1,5 @@
++import { localeFor } from '../i18n/translations';
++import type { Language } from '../i18n/translations';
+ import type { EarthquakeEvent } from '../types/events';
+ 
+ const DATE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
+@@ -5,12 +7,32 @@ const DATE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
+   hour: 'numeric', minute: '2-digit', second: '2-digit',
+   timeZoneName: 'short', // so nobody has to guess which time zone a time is in
+ };
+-export const formatDateTime = (ms: number | null): string =>
+-  ms === null ? 'Not provided' : new Date(ms).toLocaleString(undefined, DATE_TIME_OPTIONS);
+ 
+-export const formatMagnitude = (m: number | null): string => (m === null ? 'n/a' : `M ${m.toFixed(1)}`);
+-export const formatDepth = (d: number | null): string => (d === null ? 'Not provided' : `${d.toFixed(1)} km`);
+-export const placeLabel = (e: EarthquakeEvent): string => e.place ?? 'Location description not provided';
++// Dates and numbers follow each language's own conventions (Bengali uses Bengali digits, for example).
++// These only change how a value is DISPLAYED. The underlying data is untouched.
++export const formatDateTime = (ms: number | null, language: Language = 'en', missing = 'Not provided'): string =>
++  ms === null ? missing : new Date(ms).toLocaleString(localeFor(language), DATE_TIME_OPTIONS);
++
++const fixed = (n: number, digits: number, language: Language): string =>
++  new Intl.NumberFormat(localeFor(language), { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
++
++export const formatCount = (n: number, language: Language = 'en'): string =>
++  new Intl.NumberFormat(localeFor(language)).format(n);
++export const formatCoordinate = (n: number, language: Language = 'en'): string => fixed(n, 3, language);
++
++export const formatMagnitude = (m: number | null, language: Language = 'en', missing = 'n/a'): string =>
++  m === null ? missing : `M ${fixed(m, 1, language)}`;
++
++export const formatDepth = (d: number | null, language: Language = 'en', missing = 'Not provided'): string =>
++  d === null
++    ? missing
++    : new Intl.NumberFormat(localeFor(language), {
++        style: 'unit', unit: 'kilometer', unitDisplay: 'short', minimumFractionDigits: 1, maximumFractionDigits: 1,
++      }).format(d);
++
++// The place text is raw USGS data and is never translated. Only the "missing" wording is.
++export const placeLabel = (e: EarthquakeEvent, missing = 'Location description not provided'): string =>
++  e.place ?? missing;
+ 
+ // Colour bands are only a visual aid for magnitude, not a risk level.
+ export function magnitudeColor(m: number | null): string {
+diff --git a/src/lib/useFormat.ts b/src/lib/useFormat.ts
+new file mode 100644
+index 0000000..dab3019
+--- /dev/null
++++ b/src/lib/useFormat.ts
+@@ -0,0 +1,20 @@
++import { useMemo } from 'react';
++import { useLanguage } from '../i18n/LanguageContext';
++import type { EarthquakeEvent } from '../types/events';
++import { formatCoordinate, formatCount, formatDateTime, formatDepth, formatMagnitude, placeLabel } from './format';
++
++/** Formatters that already know the current language and its "missing value" wording. */
++export function useFormat() {
++  const { language, t } = useLanguage();
++  return useMemo(
++    () => ({
++      dateTime: (ms: number | null) => formatDateTime(ms, language, t('common.notProvided')),
++      magnitude: (m: number | null) => formatMagnitude(m, language, t('common.magnitudeMissing')),
++      depth: (d: number | null) => formatDepth(d, language, t('common.notProvided')),
++      coordinate: (n: number) => formatCoordinate(n, language),
++      count: (n: number) => formatCount(n, language),
++      place: (e: EarthquakeEvent) => placeLabel(e, t('event.placeMissing')),
++    }),
++    [language, t],
++  );
++}
+diff --git a/src/main.tsx b/src/main.tsx
+index cf91907..d86ea32 100644
+--- a/src/main.tsx
++++ b/src/main.tsx
+@@ -1,10 +1,13 @@
+ import { StrictMode } from 'react';
+ import { createRoot } from 'react-dom/client';
+ import App from './App';
++import { LanguageProvider } from './i18n/LanguageContext';
+ import './styles.css';
+ 
+ createRoot(document.getElementById('root')!).render(
+   <StrictMode>
+-    <App />
++    <LanguageProvider>
++      <App />
++    </LanguageProvider>
+   </StrictMode>,
+ );
+diff --git a/src/services/providers/usgs.ts b/src/services/providers/usgs.ts
+index 00617eb..a24e05a 100644
+--- a/src/services/providers/usgs.ts
++++ b/src/services/providers/usgs.ts
+@@ -79,7 +79,7 @@ export const usgsProvider: EventProvider = {
+       throw new ProviderError('network', 'Could not reach the USGS feed.');
+     }
+     if (!response.ok) {
+-      throw new ProviderError('http', `USGS feed returned HTTP ${response.status}.`);
++      throw new ProviderError('http', `USGS feed returned HTTP ${response.status}.`, response.status);
+     }
+     let json: unknown;
+     try {
+diff --git a/src/styles.css b/src/styles.css
+index 25e5491..356af45 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -12,6 +12,12 @@ h2 { font-size: 1.05rem; margin-bottom: 0.75rem; }
+ .app { max-width: 1400px; margin: 0 auto; padding: 0 1rem 1rem; }
+ .topbar { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; justify-content: space-between; align-items: center; padding: 1rem 0 0.5rem; }
+ .topbar h1 { font-size: 1.5rem; letter-spacing: 0.01em; }
++.topbar-tools { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; }
++.lang-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
++.lang-btn { background: var(--panel); color: var(--muted); border: 0; padding: 0.3rem 0.8rem; font: inherit; cursor: pointer; }
++.lang-btn + .lang-btn { border-left: 1px solid var(--line); }
++.lang-btn:hover { color: var(--text); }
++.lang-btn[aria-pressed="true"] { background: #1c3558; color: var(--text); font-weight: 600; box-shadow: inset 0 -3px 0 var(--accent); }
+ .topbar-status { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; align-items: center; }
+ .muted, .note, .meta { color: var(--muted); }
+ .note { font-size: 0.85rem; margin: 0.5rem 0 0; }
+@@ -66,3 +72,18 @@ h2 { font-size: 1.05rem; margin-bottom: 0.75rem; }
+   .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+   .tab { flex: none; white-space: nowrap; }
+ }
++
++/* Bengali and Gujarati need fonts that contain their scripts, and taller lines so the marks above and below
++   the letters are not cut. Only fonts already on the device are used, so nothing is downloaded. */
++:root {
++  --font-bn: "Noto Sans Bengali", "Nirmala UI", "Shonar Bangla", "Bangla Sangam MN", "Vrinda", "Segoe UI", system-ui, sans-serif;
++  --font-gu: "Noto Sans Gujarati", "Nirmala UI", "Shruti", "Gujarati Sangam MN", "Segoe UI", system-ui, sans-serif;
++}
++html:lang(bn), html:lang(bn) * { font-family: var(--font-bn); }
++html:lang(gu), html:lang(gu) * { font-family: var(--font-gu); }
++html:lang(bn) body, html:lang(gu) body { line-height: 1.75; }
++button.lang-btn:lang(bn) { font-family: var(--font-bn); }
++button.lang-btn:lang(gu) { font-family: var(--font-gu); }
++/* Bengali letters look smaller than Latin ones at the same size, so nudge them up for readability. */
++html:lang(bn) body { font-size: 16.5px; }
++button.lang-btn:lang(bn) { font-size: 1.1em; }
+diff --git a/src/types/events.ts b/src/types/events.ts
+index 7b4bb61..3308931 100644
+--- a/src/types/events.ts
++++ b/src/types/events.ts
+@@ -32,9 +32,11 @@ export interface EventProvider {
+ 
+ export class ProviderError extends Error {
+   readonly kind: 'network' | 'http' | 'invalid-json' | 'invalid-format';
+-  constructor(kind: ProviderError['kind'], message: string) {
++  readonly status?: number; // HTTP status, when kind is 'http'
++  constructor(kind: ProviderError['kind'], message: string, status?: number) {
+     super(message);
+     this.name = 'ProviderError';
+     this.kind = kind;
++    this.status = status;
+   }
+ }
+diff --git a/tests/LanguageContext.test.ts b/tests/LanguageContext.test.ts
+new file mode 100644
+index 0000000..0c91602
+--- /dev/null
++++ b/tests/LanguageContext.test.ts
+@@ -0,0 +1,151 @@
++// @vitest-environment jsdom
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { act, createElement } from 'react';
++import { LANGUAGE_STORAGE_KEY, LanguageProvider, useLanguage } from '../src/i18n/LanguageContext';
++import type { LanguageContextValue } from '../src/i18n/LanguageContext';
++import { LanguageSwitcher } from '../src/components/LanguageSwitcher';
++import { translations } from '../src/i18n/translations';
++import { byText, click, mount, unmountAll } from './domHelpers';
++
++function probe() {
++  const out: { current: LanguageContextValue | null } = { current: null };
++  const Probe = () => { out.current = useLanguage(); return null; };
++  return { out, Probe };
++}
++beforeEach(() => { localStorage.clear(); document.documentElement.lang = ''; });
++afterEach(() => { unmountAll(); vi.restoreAllMocks(); });
++
++describe('LanguageProvider and useLanguage', () => {
++  it('defaults to English when nothing is saved', async () => {
++    const { out, Probe } = probe();
++    await mount(createElement(LanguageProvider, null, createElement(Probe)));
++    expect(out.current!.language).toBe('en');
++    expect(out.current!.t('nav.liveMap')).toBe('Live Map');
++    expect(document.documentElement.lang).toBe('en');
++  });
++
++  it('restores the saved language on load', async () => {
++    localStorage.setItem(LANGUAGE_STORAGE_KEY, 'bn');
++    const { out, Probe } = probe();
++    await mount(createElement(LanguageProvider, null, createElement(Probe)));
++    expect(out.current!.language).toBe('bn');
++    expect(out.current!.t('nav.liveMap')).toBe(translations.bn['nav.liveMap']);
++    expect(document.documentElement.lang).toBe('bn');
++  });
++
++  it('falls back to English for an invalid saved value', async () => {
++    localStorage.setItem(LANGUAGE_STORAGE_KEY, 'klingon');
++    const { out, Probe } = probe();
++    await mount(createElement(LanguageProvider, null, createElement(Probe)));
++    expect(out.current!.language).toBe('en');
++  });
++
++  it('switches immediately, saves the choice and updates the page language', async () => {
++    const { out, Probe } = probe();
++    await mount(createElement(LanguageProvider, null, createElement(Probe)));
++    await act(async () => out.current!.setLanguage('gu'));
++    expect(out.current!.language).toBe('gu');
++    expect(out.current!.t('nav.liveMap')).toBe(translations.gu['nav.liveMap']);
++    expect(localStorage.getItem(LANGUAGE_STORAGE_KEY)).toBe('gu');
++    expect(document.documentElement.lang).toBe('gu');
++  });
++
++  it('ignores an unsupported language', async () => {
++    const { out, Probe } = probe();
++    await mount(createElement(LanguageProvider, null, createElement(Probe)));
++    await act(async () => out.current!.setLanguage('fr' as never));
++    expect(out.current!.language).toBe('en');
++    expect(localStorage.getItem(LANGUAGE_STORAGE_KEY)).toBeNull();
++  });
++
++  it('remembers the language after the page is "reloaded" (unmount and mount again)', async () => {
++    const first = probe();
++    const { unmount } = await mount(createElement(LanguageProvider, null, createElement(first.Probe)));
++    await act(async () => first.out.current!.setLanguage('bn'));
++    unmount();
++    const second = probe();
++    await mount(createElement(LanguageProvider, null, createElement(second.Probe)));
++    expect(second.out.current!.language).toBe('bn');
++  });
++
++  it('still works when the browser blocks localStorage reads and writes', async () => {
++    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked'); });
++    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked'); });
++    const { out, Probe } = probe();
++    await mount(createElement(LanguageProvider, null, createElement(Probe)));
++    expect(out.current!.language).toBe('en');
++    await act(async () => out.current!.setLanguage('bn'));
++    expect(out.current!.language).toBe('bn'); // the choice still works for this visit
++  });
++
++  it('still works when merely touching window.localStorage throws', async () => {
++    const original = Object.getOwnPropertyDescriptor(window, 'localStorage');
++    Object.defineProperty(window, 'localStorage', { configurable: true, get() { throw new DOMException('denied', 'SecurityError'); } });
++    try {
++      const { out, Probe } = probe();
++      await mount(createElement(LanguageProvider, null, createElement(Probe)));
++      expect(out.current!.language).toBe('en');
++      await act(async () => out.current!.setLanguage('gu'));
++      expect(out.current!.language).toBe('gu');
++    } finally {
++      if (original) Object.defineProperty(window, 'localStorage', original);
++    }
++  });
++
++  it('uses an injected storage when given one', async () => {
++    const data: Record<string, string> = { [LANGUAGE_STORAGE_KEY]: 'gu' };
++    const storage = { getItem: (k: string) => data[k] ?? null, setItem: (k: string, v: string) => { data[k] = v; } };
++    const { out, Probe } = probe();
++    await mount(createElement(LanguageProvider, { storage }, createElement(Probe)));
++    expect(out.current!.language).toBe('gu');
++    await act(async () => out.current!.setLanguage('bn'));
++    expect(data[LANGUAGE_STORAGE_KEY]).toBe('bn');
++    expect(localStorage.getItem(LANGUAGE_STORAGE_KEY)).toBeNull();
++  });
++
++  it('works in English without any provider', async () => {
++    const { out, Probe } = probe();
++    await mount(createElement(Probe));
++    expect(out.current!.language).toBe('en');
++    expect(out.current!.t('nav.liveMap')).toBe('Live Map');
++    expect(() => out.current!.setLanguage('bn')).not.toThrow();
++  });
++});
++
++describe('LanguageSwitcher', () => {
++  const renderSwitcher = () => mount(createElement(LanguageProvider, null, createElement(LanguageSwitcher)));
++
++  it('shows the three native language names as real buttons', async () => {
++    const { host } = await renderSwitcher();
++    const buttons = [...host.querySelectorAll('button')];
++    expect(buttons.map((b) => b.textContent)).toEqual(['English', 'বাংলা', 'ગુજરાતી']);
++    expect(buttons.map((b) => b.getAttribute('lang'))).toEqual(['en', 'bn', 'gu']);
++    for (const b of buttons) { expect(b.type).toBe('button'); expect(b.disabled).toBe(false); expect(b.tabIndex).toBeGreaterThanOrEqual(0); }
++  });
++
++  it('marks exactly the active language and updates immediately on click', async () => {
++    const { host } = await renderSwitcher();
++    const pressed = () => [...host.querySelectorAll('button')].map((b) => b.getAttribute('aria-pressed'));
++    expect(pressed()).toEqual(['true', 'false', 'false']);
++    await click(byText(host, 'button', 'বাংলা'));
++    expect(pressed()).toEqual(['false', 'true', 'false']);
++    await click(byText(host, 'button', 'ગુજરાતી'));
++    expect(pressed()).toEqual(['false', 'false', 'true']);
++    expect(document.documentElement.lang).toBe('gu');
++  });
++
++  it('has an accessible group label that follows the language', async () => {
++    const { host } = await renderSwitcher();
++    const group = () => host.querySelector('[role="group"]')!.getAttribute('aria-label');
++    expect(group()).toBe('Language');
++    await click(byText(host, 'button', 'বাংলা'));
++    expect(group()).toBe(translations.bn['language.label']);
++  });
++
++  it('can receive keyboard focus', async () => {
++    const { host } = await renderSwitcher();
++    const second = byText<HTMLButtonElement>(host, 'button', 'বাংলা');
++    second.focus();
++    expect(document.activeElement).toBe(second);
++  });
++});
+diff --git a/tests/domHelpers.ts b/tests/domHelpers.ts
+new file mode 100644
+index 0000000..ac08714
+--- /dev/null
++++ b/tests/domHelpers.ts
+@@ -0,0 +1,35 @@
++// Small helpers shared by the DOM (jsdom) tests.
++import { act } from 'react';
++import type { ReactElement } from 'react';
++import { createRoot } from 'react-dom/client';
++
++(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++
++/** jsdom has no layout. Leaflet only draws a map that has a size, so give every element one. */
++export function giveElementsASize() {
++  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 800 });
++  Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 600 });
++}
++
++const mounted: Array<() => void> = [];
++export async function mount(ui: ReactElement) {
++  const host = document.createElement('div');
++  document.body.appendChild(host);
++  const root = createRoot(host);
++  await act(async () => root.render(ui));
++  const unmount = () => { act(() => root.unmount()); host.remove(); };
++  mounted.push(unmount);
++  return { host, unmount };
++}
++export function unmountAll() { while (mounted.length) mounted.pop()!(); }
++
++/** Let pending promises and zero-delay timers finish (for example a mocked fetch resolving). */
++export async function settle(rounds = 3) {
++  for (let i = 0; i < rounds; i += 1) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
++}
++export const click = (el: Element) => act(async () => { (el as HTMLElement).click(); });
++export const byText = <T extends Element>(root: ParentNode, selector: string, text: string): T => {
++  const found = [...root.querySelectorAll<T>(selector)].find((e) => e.textContent?.trim() === text);
++  if (!found) throw new Error(`No ${selector} with text "${text}"`);
++  return found;
++};
+diff --git a/tests/feedErrors.test.ts b/tests/feedErrors.test.ts
+new file mode 100644
+index 0000000..879e044
+--- /dev/null
++++ b/tests/feedErrors.test.ts
+@@ -0,0 +1,54 @@
++// @vitest-environment jsdom
++import { afterEach, describe, expect, it, vi } from 'vitest';
++import { createElement } from 'react';
++import { useEarthquakeFeed } from '../src/hooks/useEarthquakeFeed';
++import { describeFeedError } from '../src/lib/errors';
++import type { FeedErrorKind } from '../src/lib/errors';
++import { translate, translations } from '../src/i18n/translations';
++import type { Language } from '../src/i18n/translations';
++import { parseUsgsGeoJson } from '../src/services/providers/usgs';
++import { ProviderError } from '../src/types/events';
++import type { EventProvider } from '../src/types/events';
++import { collection, feature } from './fixtures';
++import { mount, settle, unmountAll } from './domHelpers';
++
++afterEach(() => unmountAll());
++
++describe('describeFeedError', () => {
++  const kinds: FeedErrorKind[] = ['network', 'http', 'invalid-json', 'invalid-format', 'unknown'];
++  it.each(['en', 'bn', 'gu'] as Language[])('gives a translated message for every kind in %s', (lang) => {
++    const t = (k: Parameters<typeof translate>[1], p?: Record<string, string | number>) => translate(lang, k, p);
++    const messages = kinds.map((k) => describeFeedError(t, k, 503));
++    expect(new Set(messages).size).toBe(kinds.length);
++    expect(messages[0]).toBe(translations[lang]['error.network']);
++    expect(messages[1]).toContain('503');
++    for (const m of messages) expect(m).not.toContain('{');
++  });
++});
++
++describe('useEarthquakeFeed error details', () => {
++  const run = async (fetchSnapshot: EventProvider['fetchSnapshot']) => {
++    const out: { current: ReturnType<typeof useEarthquakeFeed> | null } = { current: null };
++    const provider: EventProvider = { id: 't', name: 't', fetchSnapshot };
++    const Probe = () => { out.current = useEarthquakeFeed(provider); return null; };
++    await mount(createElement(Probe));
++    await settle();
++    return out.current!;
++  };
++  it('reports the kind and HTTP status of a provider error, separately from its English message', async () => {
++    const feed = await run(vi.fn(async () => { throw new ProviderError('http', 'USGS feed returned HTTP 503.', 503); }));
++    expect(feed.errorKind).toBe('http');
++    expect(feed.errorStatus).toBe(503);
++    expect(feed.error).toBe('USGS feed returned HTTP 503.'); // existing behaviour is unchanged
++  });
++  it('reports "unknown" for an unexpected error', async () => {
++    const feed = await run(vi.fn(async () => { throw new Error('weird'); }));
++    expect(feed.errorKind).toBe('unknown');
++    expect(feed.errorStatus).toBeNull();
++  });
++  it('has no error details after a successful fetch', async () => {
++    const feed = await run(vi.fn(async () => parseUsgsGeoJson(collection([feature()]))));
++    expect(feed.errorKind).toBeNull();
++    expect(feed.errorStatus).toBeNull();
++  });
++});
+diff --git a/tests/formatLocale.test.ts b/tests/formatLocale.test.ts
+new file mode 100644
+index 0000000..3f9417e
+--- /dev/null
++++ b/tests/formatLocale.test.ts
+@@ -0,0 +1,45 @@
++import { describe, expect, it } from 'vitest';
++import { formatCoordinate, formatCount, formatDateTime, formatDepth, formatMagnitude, placeLabel } from '../src/lib/format';
++import { parseUsgsGeoJson } from '../src/services/providers/usgs';
++import { collection, feature } from './fixtures';
++
++const BN_DIGITS = /[\u09E6-\u09EF]/;
++
++describe('locale-aware formatting', () => {
++  it('uses Bengali digits for Bengali and ordinary digits for English and Gujarati', () => {
++    expect(formatMagnitude(4.6, 'en')).toBe('M 4.6');
++    expect(formatMagnitude(4.6, 'bn')).toBe('M ৪.৬');
++    expect(formatMagnitude(4.6, 'gu')).toBe('M 4.6');
++    expect(formatCount(330, 'bn')).toBe('৩৩০');
++    expect(formatCoordinate(90.4, 'bn')).toBe('৯০.৪০০');
++    expect(formatCoordinate(90.4, 'en')).toBe('90.400');
++  });
++  it('formats depth with the language\'s own kilometre unit', () => {
++    expect(formatDepth(12.34, 'en')).toBe('12.3 km');
++    expect(formatDepth(12.34, 'bn')).toMatch(BN_DIGITS);
++    expect(formatDepth(12.34, 'bn')).not.toContain('km');
++    expect(formatDepth(12.34, 'gu')).toContain('12.3');
++    expect(formatDepth(12.34, 'gu')).not.toContain('km');
++  });
++  it('formats the same moment in each language and always includes the time zone', () => {
++    const ms = 1700000000000; // a fixed moment, 14 Nov 2023
++    expect(formatDateTime(ms, 'en')).toContain('2023');
++    expect(formatDateTime(ms, 'bn')).toMatch(BN_DIGITS);
++    expect(formatDateTime(ms, 'gu')).toContain('2023');
++    for (const l of ['en', 'bn', 'gu'] as const) expect(formatDateTime(ms, l).length).toBeGreaterThan(15);
++  });
++  it('uses the wording it is given for missing values, and English by default', () => {
++    expect(formatDepth(null, 'bn', 'দেওয়া হয়নি')).toBe('দেওয়া হয়নি');
++    expect(formatMagnitude(null, 'gu', 'અજ્ઞાત')).toBe('અજ્ઞાત');
++    expect(formatDateTime(null, 'bn', 'X')).toBe('X');
++    expect(formatDepth(null)).toBe('Not provided');
++  });
++  it('never alters the place text from USGS', () => {
++    const [withPlace, withoutPlace] = parseUsgsGeoJson(collection([
++      feature({ id: 'a', props: { place: '5 km NE of Cox\'s Bazar, Bangladesh' } }),
++      feature({ id: 'b', props: { place: null, time: 1 } }),
++    ])).events;
++    expect(placeLabel(withPlace, 'MISSING')).toBe('5 km NE of Cox\'s Bazar, Bangladesh');
++    expect(placeLabel(withoutPlace, 'MISSING')).toBe('MISSING');
++  });
++});
+diff --git a/tests/i18nApp.test.ts b/tests/i18nApp.test.ts
+new file mode 100644
+index 0000000..7415875
+--- /dev/null
++++ b/tests/i18nApp.test.ts
+@@ -0,0 +1,173 @@
++// @vitest-environment jsdom
++// The whole app, in all three languages. The USGS feed is replaced by a mocked fetch that returns synthetic TEST
++// events (see fixtures.ts). Nothing here ever reaches the real network.
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { createElement } from 'react';
++import App from '../src/App';
++import { LanguageProvider, LANGUAGE_STORAGE_KEY } from '../src/i18n/LanguageContext';
++import { translate, translations } from '../src/i18n/translations';
++import type { Language } from '../src/i18n/translations';
++import { collection, feature } from './fixtures';
++import { byText, click, giveElementsASize, mount, settle, unmountAll } from './domHelpers';
++
++giveElementsASize();
++
++const PLACE_BD = 'TEST EVENT BD (synthetic)';
++const PLACE_JP = 'TEST EVENT JP (synthetic)';
++const URL_BD = 'https://earthquake.usgs.gov/earthquakes/eventpage/tst-bd';
++const feed = collection([
++  feature({ id: 'tst-bd', props: { mag: 4.6, place: PLACE_BD, time: 1700000000000, url: URL_BD }, coordinates: [90.4, 23.8, 12.34] }),
++  feature({ id: 'tst-jp', props: { mag: 5.4, place: PLACE_JP, time: 1699990000000 }, coordinates: [142.0, 38.0, 30] }),
++  feature({ id: 'tst-none', props: { mag: null, place: null, time: 1699980000000, url: null }, coordinates: [-120.5, 36.2] }),
++]);
++const RAW = [PLACE_BD, PLACE_JP, 'tst-bd', 'tst-jp', 'tst-none', URL_BD];
++
++const stubFeed = (impl: () => Promise<Response>) => vi.stubGlobal('fetch', vi.fn(impl));
++const okFeed = () => stubFeed(async () => new Response(JSON.stringify(feed)));
++const render = async () => {
++  const m = await mount(createElement(LanguageProvider, null, createElement(App)));
++  await settle();
++  return m;
++};
++const choose = (host: HTMLElement, native: string) => click(byText(host, '.lang-btn', native));
++const tabLabels = (host: HTMLElement) => [...host.querySelectorAll('.tab')].map((e) => e.textContent);
++const tabKeys = ['nav.liveMap', 'nav.eventFeed', 'nav.verify', 'nav.sources'] as const;
++
++// International names that may stay in Latin letters. 'English' is the language switcher's own native label.
++const ALLOWED = ['English', 'USGS Earthquake Hazards Program', 'USGS', 'BANGUJ Bridge', 'OpenStreetMap', 'contributors', 'Leaflet', 'GeoJSON', 'JSON', 'HTTP', 'UTC', 'GMT', 'Access blocked', 'GDACS', 'Bangladesh FFWC', 'India Meteorological Department', 'Open-Meteo', 'GDELT'];
++function englishLeaks(host: HTMLElement): string[] {
++  const attrs = [...host.querySelectorAll('[aria-label],[title],[alt]')].map((e) => `${e.getAttribute('aria-label') ?? ''} ${e.getAttribute('title') ?? ''} ${e.getAttribute('alt') ?? ''}`);
++  let rest = `${host.textContent} ${attrs.join(' ')}`;
++  for (const s of [...RAW, ...ALLOWED].sort((a, b) => b.length - a.length)) rest = rest.split(s).join(' ');
++  return rest.match(/[A-Za-z]{3,}/g) ?? [];
++}
++
++beforeEach(() => { localStorage.clear(); document.documentElement.lang = ''; });
++afterEach(() => { unmountAll(); vi.unstubAllGlobals(); });
++
++describe('App interface language', () => {
++  it('starts in English and translates the header, navigation and footer immediately when switched', async () => {
++    okFeed();
++    const { host } = await render();
++    expect(tabLabels(host)).toEqual(tabKeys.map((k) => translate('en', k)));
++    await choose(host, 'বাংলা');
++    expect(tabLabels(host)).toEqual(tabKeys.map((k) => translations.bn[k]));
++    expect(host.querySelector('footer')!.textContent).toBe(translations.bn['footer.text']);
++    expect(host.querySelector('h1')!.textContent).toBe('BANGUJ Bridge'); // proper noun is kept
++    expect(document.documentElement.lang).toBe('bn');
++    await choose(host, 'ગુજરાતી');
++    expect(tabLabels(host)).toEqual(tabKeys.map((k) => translations.gu[k]));
++    await choose(host, 'English');
++    expect(tabLabels(host)).toEqual(tabKeys.map((k) => translations.en[k]));
++  });
++
++  it('restores the saved language when the app is opened again', async () => {
++    okFeed();
++    const first = await render();
++    await choose(first.host, 'ગુજરાતી');
++    expect(localStorage.getItem(LANGUAGE_STORAGE_KEY)).toBe('gu');
++    first.unmount();
++    const second = await render();
++    expect(tabLabels(second.host)).toEqual(tabKeys.map((k) => translations.gu[k]));
++  });
++
++  it.each(['bn', 'gu'] as Language[])('never translates raw USGS data (%s)', async (lang) => {
++    okFeed();
++    const { host } = await render();
++    await choose(host, lang === 'bn' ? 'বাংলা' : 'ગુજરાતી');
++    const feedText = host.querySelector('.feed')!.textContent!;
++    expect(feedText).toContain(PLACE_BD);
++    expect(feedText).toContain(PLACE_JP);
++    await click(host.querySelectorAll('.feed-item')[0]); // newest event: tst-bd
++    expect(host.querySelector('.detail-title')!.textContent).toContain(PLACE_BD);
++    expect(host.querySelector('.details')!.textContent).toContain('tst-bd'); // event ID untouched
++    expect(host.querySelector<HTMLAnchorElement>('.ext')!.getAttribute('href')).toBe(URL_BD);
++    expect(host.textContent).toContain(translations[lang]['event.placeMissing']); // the missing-place wording IS translated
++  });
++
++  it('shows numbers in the language\'s own digits (Bengali) while leaving the data values unchanged', async () => {
++    okFeed();
++    const { host } = await render();
++    await choose(host, 'বাংলা');
++    await click(host.querySelectorAll('.feed-item')[0]);
++    const details = host.querySelector('.details')!.textContent!;
++    expect(details).toContain('১২.৩'); // depth 12.34 km
++    expect(details).not.toContain('12.3');
++    expect(details).toContain('৯০.৪০০'); // longitude 90.4
++  });
++
++  it('keeps the feed, selection and counts working in every language', async () => {
++    okFeed();
++    const { host } = await render();
++    for (const native of ['English', 'বাংলা', 'ગુજરાતી']) {
++      await choose(host, native);
++      expect(host.querySelectorAll('.feed-item').length).toBe(3);
++      await click(host.querySelectorAll('.feed-item')[1]);
++      expect(host.querySelectorAll('.feed-row.selected').length).toBe(1);
++    }
++  });
++
++  it('translates the region buttons and keeps region filtering working', async () => {
++    okFeed();
++    const { host } = await render();
++    await choose(host, 'বাংলা');
++    await click(byText(host, '.chip', translations.bn['region.bangladesh.button']));
++    expect([...host.querySelectorAll('.feed-item')].length).toBe(1);
++    expect(host.querySelector('.feed')!.textContent).toContain(PLACE_BD);
++    expect(host.querySelector('.feed')!.textContent).not.toContain(PLACE_JP);
++    await click(byText(host, '.chip', translations.bn['region.gujarat.button']));
++    expect(host.querySelectorAll('.feed-item').length).toBe(0);
++    expect(host.querySelector('.banner.info')!.textContent).toBe(
++      translate('bn', 'region.emptyNotice', { region: translations.bn['region.gujarat.name'] }),
++    );
++  });
++
++  it('translates the map controls, and updates them when the language changes', async () => {
++    okFeed();
++    const { host } = await render();
++    const zoomIn = () => host.querySelector('.leaflet-control-zoom-in')!.getAttribute('title');
++    expect(zoomIn()).toBe(translations.en['map.zoomIn']);
++    await choose(host, 'ગુજરાતી');
++    expect(zoomIn()).toBe(translations.gu['map.zoomIn']);
++    expect(host.querySelector('.leaflet-control-attribution')!.textContent).toContain('OpenStreetMap');
++  });
++
++  it.each(['bn', 'gu'] as Language[])('leaves no untranslated English text on any page (%s)', async (lang) => {
++    okFeed();
++    const { host } = await render();
++    await choose(host, lang === 'bn' ? 'বাংলা' : 'ગુજરાતી');
++    for (const [i, key] of tabKeys.entries()) {
++      await click(byText(host, '.tab', translations[lang][key]));
++      if (i < 2) await click(host.querySelectorAll('.feed-item')[0]); // also show the event details panel
++      expect(englishLeaks(host), `${lang} / ${key}`).toEqual([]);
++    }
++  });
++});
++
++describe('App messages when the feed is unavailable', () => {
++  it('translates the unavailable banner and the failure reason', async () => {
++    stubFeed(async () => { throw new TypeError('Failed to fetch'); });
++    const { host } = await render();
++    const banner = () => host.querySelector('.banner.error')!.textContent;
++    expect(banner()).toContain(translations.en['error.network']);
++    await choose(host, 'বাংলা');
++    expect(banner()).toContain(translations.bn['error.network']);
++    expect(banner()).toContain('৬০'); // retry interval shown in Bengali digits
++    expect([...host.querySelectorAll('.empty')].map((e) => e.textContent)).toContain(translations.bn['feed.unavailable']);
++    expect(host.querySelector('.error[role="alert"]')!.textContent).toContain(translations.bn['error.network']);
++  });
++
++  it('includes the HTTP status in the translated reason', async () => {
++    stubFeed(async () => new Response('down', { status: 503 }));
++    const { host } = await render();
++    await choose(host, 'ગુજરાતી');
++    expect(host.querySelector('.banner.error')!.textContent).toContain(translate('gu', 'error.http', { status: 503 }));
++  });
++
++  it.each(['bn', 'gu'] as Language[])('leaves no untranslated English text in the error state (%s)', async (lang) => {
++    stubFeed(async () => new Response('down', { status: 503 }));
++    const { host } = await render();
++    await choose(host, lang === 'bn' ? 'বাংলা' : 'ગુજરાતી');
++    expect(englishLeaks(host)).toEqual([]);
++  });
++});
+diff --git a/tests/languageStorage.test.ts b/tests/languageStorage.test.ts
+new file mode 100644
+index 0000000..58bcb50
+--- /dev/null
++++ b/tests/languageStorage.test.ts
+@@ -0,0 +1,41 @@
++// Runs in the plain Node environment on purpose: there is no window here, which is what server-side rendering looks like.
++import { describe, expect, it } from 'vitest';
++import { LANGUAGE_STORAGE_KEY, readStoredLanguage, storeLanguage } from '../src/i18n/LanguageContext';
++
++const fakeStorage = (initial: Record<string, string> = {}) => {
++  const data = { ...initial };
++  return { data, getItem: (k: string) => data[k] ?? null, setItem: (k: string, v: string) => { data[k] = v; } };
++};
++
++describe('saved language', () => {
++  it('runs without a window (server-side rendering) and defaults to English', () => {
++    expect(typeof window).toBe('undefined');
++    expect(readStoredLanguage()).toBe('en');
++    expect(storeLanguage('bn')).toBe(false);
++  });
++  it('defaults to English when nothing is saved', () => {
++    expect(readStoredLanguage(fakeStorage())).toBe('en');
++  });
++  it('restores each saved language', () => {
++    for (const code of ['en', 'bn', 'gu'] as const) {
++      expect(readStoredLanguage(fakeStorage({ [LANGUAGE_STORAGE_KEY]: code }))).toBe(code);
++    }
++  });
++  it('ignores invalid saved values', () => {
++    for (const bad of ['fr', '', 'BN', 'null', '{"a":1}', ' bn', 'bn ']) {
++      expect(readStoredLanguage(fakeStorage({ [LANGUAGE_STORAGE_KEY]: bad })), JSON.stringify(bad)).toBe('en');
++    }
++  });
++  it('survives storage that throws or is missing', () => {
++    expect(readStoredLanguage({ getItem: () => { throw new Error('blocked'); } })).toBe('en');
++    expect(readStoredLanguage(null)).toBe('en');
++    expect(storeLanguage('gu', null)).toBe(false);
++    expect(storeLanguage('gu', { setItem: () => { throw new Error('quota'); } })).toBe(false);
++  });
++  it('saves under the documented key', () => {
++    const s = fakeStorage();
++    expect(storeLanguage('gu', s)).toBe(true);
++    expect(s.data[LANGUAGE_STORAGE_KEY]).toBe('gu');
++    expect(LANGUAGE_STORAGE_KEY).toBe('banguj.language');
++  });
++});
+diff --git a/tests/translations.test.ts b/tests/translations.test.ts
+new file mode 100644
+index 0000000..06f90ae
+--- /dev/null
++++ b/tests/translations.test.ts
+@@ -0,0 +1,80 @@
++import { describe, expect, it } from 'vitest';
++import { DEFAULT_LANGUAGE, LANGUAGES, en, isLanguage, translate, translations } from '../src/i18n/translations';
++import type { Language, TranslationKey } from '../src/i18n/translations';
++
++const keys = Object.keys(en) as TranslationKey[];
++const nonEnglish: Language[] = ['bn', 'gu'];
++const placeholders = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
++const SCRIPT: Record<string, RegExp> = { bn: /[\u0980-\u09FF]/, gu: /[\u0A80-\u0AFF]/ };
++// Text that is intentionally the same in every language (proper nouns).
++const SAME_IN_ALL = new Set<TranslationKey>(['app.name', 'sources.name']);
++// International names that may legitimately appear in Latin letters inside Bengali or Gujarati text.
++const ALLOWED_LATIN = ['USGS Earthquake Hazards Program', 'USGS', 'BANGUJ Bridge', 'OpenStreetMap', 'GeoJSON', 'JSON', 'HTTP', 'Access blocked'];
++const latinLeaks = (text: string) => {
++  let rest = text.replace(/\{\w+\}/g, ' ');
++  for (const s of ALLOWED_LATIN) rest = rest.split(s).join(' ');
++  return rest.match(/[A-Za-z]{3,}/g) ?? [];
++};
++
++describe('languages', () => {
++  it('offers English, Bengali and Gujarati with native names', () => {
++    expect(LANGUAGES.map((l) => l.code)).toEqual(['en', 'bn', 'gu']);
++    expect(LANGUAGES.map((l) => l.nativeName)).toEqual(['English', 'বাংলা', 'ગુજરાતી']);
++  });
++  it('defaults to English and recognises only supported languages', () => {
++    expect(DEFAULT_LANGUAGE).toBe('en');
++    for (const ok of ['en', 'bn', 'gu']) expect(isLanguage(ok)).toBe(true);
++    for (const bad of ['fr', 'EN', '', null, undefined, 5, {}]) expect(isLanguage(bad)).toBe(false);
++  });
++});
++
++describe.each(nonEnglish)('%s dictionary', (lang) => {
++  const dict = translations[lang] as Record<string, string>;
++  it('has exactly the same keys as English', () => {
++    expect(Object.keys(dict).sort()).toEqual([...keys].sort());
++  });
++  it('has no empty or whitespace-padded values', () => {
++    for (const k of keys) {
++      expect(dict[k], k).toBeTruthy();
++      expect(dict[k], k).toBe(dict[k].trim());
++    }
++  });
++  it('uses the same {placeholders} as English for every key (so no value is silently dropped)', () => {
++    for (const k of keys) expect(placeholders(dict[k]), k).toEqual(placeholders(en[k]));
++  });
++  it('is actually written in its own script, not left in English', () => {
++    for (const k of keys) {
++      if (SAME_IN_ALL.has(k)) continue;
++      expect(dict[k], k).toMatch(SCRIPT[lang]);
++    }
++  });
++  it('contains no stray English words beyond proper nouns', () => {
++    for (const k of keys) expect(latinLeaks(dict[k]), `${k}: ${dict[k]}`).toEqual([]);
++  });
++  it('differs from English except for proper nouns', () => {
++    for (const k of keys) if (!SAME_IN_ALL.has(k)) expect(dict[k], k).not.toBe(en[k]);
++  });
++  it('keeps the proper nouns in the safety disclaimer', () => {
++    expect(dict['footer.text']).toContain('USGS');
++    expect(dict['footer.text']).toContain('BANGUJ Bridge');
++    expect(dict['details.disclaimer']).toContain('USGS');
++  });
++});
++
++describe('translate()', () => {
++  it('returns the text for the chosen language', () => {
++    expect(translate('en', 'nav.liveMap')).toBe('Live Map');
++    expect(translate('bn', 'nav.liveMap')).toBe(translations.bn['nav.liveMap']);
++    expect(translate('gu', 'nav.liveMap')).toBe(translations.gu['nav.liveMap']);
++  });
++  it('fills in placeholders', () => {
++    expect(translate('en', 'health.autoRefreshValue', { seconds: 60 })).toBe('Every 60 seconds while this page is open');
++    expect(translate('bn', 'feed.titleCount', { count: '৩' })).toContain('৩');
++  });
++  it('leaves an unfilled placeholder visible instead of hiding the problem', () => {
++    expect(translate('en', 'feed.titleCount', {})).toContain('{count}');
++  });
++  it('falls back to English for an unknown language', () => {
++    expect(translate('fr' as Language, 'nav.liveMap')).toBe('Live Map');
++  });
++});
+-- 
+2.43.0
+

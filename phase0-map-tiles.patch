@@ -1,0 +1,336 @@
+From c62b58054543c7ae9fa51a60043137edc8d55626 Mon Sep 17 00:00:00 2001
+From: "Claude (AI assistant)" <noreply@anthropic.com>
+Date: Sat, 14 Nov 2026 17:29:12 +0000
+Subject: [PATCH] Phase 0: send a Referer with map tiles, graceful fallback
+ when the basemap is unavailable, Cloudflare _headers, roadmap
+
+---
+ README.md                  | 17 ++++++++++++-
+ docs/ROADMAP.md            | 42 ++++++++++++++++++++++++++++++++
+ index.html                 |  1 +
+ public/_headers            |  3 +++
+ src/components/MapView.tsx | 29 +++++++++++++++++++---
+ src/lib/tiles.ts           | 24 ++++++++++++++++++
+ src/styles.css             |  4 +++
+ tests/mapTiles.test.ts     | 50 ++++++++++++++++++++++++++++++++++++++
+ tests/mapTilesDom.test.ts  | 40 ++++++++++++++++++++++++++++++
+ 9 files changed, 205 insertions(+), 5 deletions(-)
+ create mode 100644 docs/ROADMAP.md
+ create mode 100644 public/_headers
+ create mode 100644 src/lib/tiles.ts
+ create mode 100644 tests/mapTiles.test.ts
+ create mode 100644 tests/mapTilesDom.test.ts
+
+diff --git a/README.md b/README.md
+index ae8ae69..ac36d0b 100644
+--- a/README.md
++++ b/README.md
+@@ -55,7 +55,7 @@ Requires Node.js 20 or newer and a normal internet connection (the browser fetch
+ ## Testing
+ 
+ ```bash
+-npm test           # 27 automated tests
++npm test           # 38 automated tests
+ npm run typecheck
+ npm run build
+ ```
+@@ -66,6 +66,21 @@ The tests use **synthetic fixtures in the real USGS format**. They are never sho
+ 
+ The built app was also driven in a real headless Chromium browser: rendering, the unavailable state, map markers, popups, event selection, region buttons, tabs, manual and automatic refresh, stale detection and a phone-sized screen. In that browser run USGS responses were replaced by synthetic test events, because the test environment could not reach `earthquake.usgs.gov`. **That run does not prove the live USGS connection.** Use the checklist at the end of this file.
+ 
++## Troubleshooting: the map shows "Access blocked"
++
++The background map comes from OpenStreetMap, whose tile servers refuse requests that arrive without a `Referer`
++header. Some embedded previews (for example a GitHub Codespaces preview pane) and some privacy tools strip it.
++
++- The app now sets a referrer policy on the map tiles themselves, on the page (`index.html`), and for Cloudflare
++  hosting (`public/_headers`), so a stricter page-level policy no longer removes the Referer.
++- If the map background still fails, a notice appears and earthquakes are drawn on a plain background at their real
++  coordinates. A "Map background not loading?" note explains the usual cause.
++- Limits: the notice appears when tiles fail to load. If a server returns an "Access blocked" image that loads
++  successfully, the app cannot detect it, which is what the help note is for. In that case open the app in a normal
++  browser tab.
++- To check by hand: open the browser developer tools, Network tab, click a tile request, and look for a `Referer`
++  request header.
++
+ ## Project structure
+ 
+ ```
+diff --git a/docs/ROADMAP.md b/docs/ROADMAP.md
+new file mode 100644
+index 0000000..f45ff97
+--- /dev/null
++++ b/docs/ROADMAP.md
+@@ -0,0 +1,42 @@
++# BANGUJ Bridge roadmap
++
++Goal: a small but **genuinely working** end-to-end demonstration of a bilingual (Bengali, Gujarati, English)
++public-safety notice workspace, before anything else is added.
++
++## Rules that apply to every phase
++
++- **No fake output.** No simulated translations, extractions or verification results. If a provider is not
++  configured or fails, the interface says so plainly.
++- Test fixtures live only in `tests/`, and are labelled as synthetic.
++- Every result carries its source, which engine produced it, and an uncertainty warning. Nothing here is an
++  official warning or instruction.
++- Each phase is its own branch and pull request. Existing tests are never deleted. New features ship with tests.
++- Secrets live only in the Cloudflare Worker, never in the frontend.
++
++## Phases
++
++| Phase | What | Status |
++|---|---|---|
++| 0 | Map tiles send a Referer (fixes OpenStreetMap "Access blocked" in some previews); graceful fallback if the basemap is unavailable; Cloudflare `_headers` | Done (this branch) |
++| 1 | Bengali, Gujarati and English interface; language switcher; locale-aware dates and numbers; deterministic script-based language detection | Next |
++| 2 | Emergency notice workspace: paste or submit a notice, optional source name, link and time, detected language, original text panel, honest "service not connected" states | Planned |
++| 3 | Cloudflare Worker foundation: health endpoint (reports which providers are really configured), CORS allowlist, input limits, rate limiting | Planned |
++| 4 | Translation between Bengali, Gujarati and English through a real provider, side by side with the original | Planned |
++| 5 | Extraction of location, event, time, severity and safety instructions, with verbatim evidence checked against the source text | Planned |
++| 6 | Comparison of two notices for conflicting or missing critical information | Planned |
++| 7 | D1 alert history, retention rules, evaluation on real notices | Planned |
++
++## Minimum honest demonstration (target)
++
++1. Paste a notice in Bengali, Gujarati or English.
++2. The app detects the script (a real, deterministic check) and shows the original text.
++3. If a translation provider is configured, show its translation next to the original, labelled as machine
++   translation. If not, say "Translation service not connected".
++4. Phases 5 and 6 are added only once 1 to 4 genuinely work.
++
++## Known limits
++
++- OpenStreetMap's free tile server is not meant for heavy production use. A production launch needs a tile
++  provider plan.
++- Machine translation of emergency notices can be wrong, especially for negation, numbers and times. Results are
++  for human review.
+diff --git a/index.html b/index.html
+index f0b3f8f..725686b 100644
+--- a/index.html
++++ b/index.html
+@@ -3,6 +3,7 @@
+   <head>
+     <meta charset="UTF-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1" />
++    <meta name="referrer" content="strict-origin-when-cross-origin" />
+     <title>BANGUJ Bridge</title>
+   </head>
+   <body>
+diff --git a/public/_headers b/public/_headers
+new file mode 100644
+index 0000000..83eb9ce
+--- /dev/null
++++ b/public/_headers
+@@ -0,0 +1,3 @@
++/*
++  Referrer-Policy: strict-origin-when-cross-origin
++  X-Content-Type-Options: nosniff
+diff --git a/src/components/MapView.tsx b/src/components/MapView.tsx
+index 2a30d7c..a7263ff 100644
+--- a/src/components/MapView.tsx
++++ b/src/components/MapView.tsx
+@@ -1,9 +1,11 @@
+-import { useEffect, useMemo, useRef } from 'react';
++import { useEffect, useMemo, useRef, useState } from 'react';
+ import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet';
+ import 'leaflet/dist/leaflet.css';
+ import type { EarthquakeEvent } from '../types/events';
+ import { getRegion } from '../services/regions';
+ import type { RegionId } from '../services/regions';
++import { TILE_ATTRIBUTION, TILE_REFERRER_POLICY, TILE_URL, onTileFailed, onTileLoaded, tileStatus } from '../lib/tiles';
++import type { TileHealth } from '../lib/tiles';
+ import { formatDateTime, formatDepth, formatMagnitude, magnitudeColor, markerRadius, placeLabel } from '../lib/format';
+ 
+ function MapController({ region, selected }: { region: RegionId; selected: EarthquakeEvent | null }) {
+@@ -37,12 +39,23 @@ interface Props {
+ export function MapView({ events, region, selected, onSelect }: Props) {
+   // Draw big quakes first so small ones stay clickable on top.
+   const ordered = useMemo(() => [...events].sort((a, b) => (b.magnitude ?? 0) - (a.magnitude ?? 0)), [events]);
++  const [tiles, setTiles] = useState<TileHealth>({ loaded: 0, failed: 0 });
++  const status = tileStatus(tiles);
++  const tileHandlers = useMemo(() => ({ tileload: () => setTiles(onTileLoaded), tileerror: () => setTiles(onTileFailed) }), []);
+   return (
+-    <div className="map-wrap">
++    <div className="map-wrap" data-tiles={status}>
++      {status === 'unavailable' && (
++        <p className="banner info" role="status">
++          The map background could not be loaded, so earthquakes are shown on a plain background. Their positions are
++          still plotted at the real coordinates reported by USGS.
++        </p>
++      )}
+       <MapContainer center={[20, 10]} zoom={2} minZoom={1} worldCopyJump className="map" scrollWheelZoom>
+         <TileLayer
+-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+-          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
++          attribution={TILE_ATTRIBUTION}
++          url={TILE_URL}
++          referrerPolicy={TILE_REFERRER_POLICY}
++          eventHandlers={tileHandlers}
+         />
+         <MapController region={region} selected={selected} />
+         {ordered.map((e) => (
+@@ -80,6 +93,14 @@ export function MapView({ events, region, selected, onSelect }: Props) {
+         Marker size and colour show reported magnitude: blue under 4, amber 4 to 4.9, orange 5 to 5.9, red 6 and above.
+         Colours are a visual aid only, not a risk level.
+       </p>
++      <details className="help">
++        <summary>Map background not loading?</summary>
++        <p>
++          The background map comes from OpenStreetMap. If it shows an “Access blocked” image or stays blank, the page may
++          be running inside an embedded preview, or behind a privacy tool that hides where the request comes from. Open the
++          app in a normal browser tab. Earthquake markers are drawn at their true coordinates either way.
++        </p>
++      </details>
+     </div>
+   );
+ }
+diff --git a/src/lib/tiles.ts b/src/lib/tiles.ts
+new file mode 100644
+index 0000000..0518225
+--- /dev/null
++++ b/src/lib/tiles.ts
+@@ -0,0 +1,24 @@
++// Basemap settings, and the small piece of logic that decides whether the basemap is working.
++
++export const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
++export const TILE_ATTRIBUTION =
++  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
++
++// OpenStreetMap's tile servers refuse requests that arrive without a Referer header
++// (the tile then shows "Access blocked. Referer is required"). Some hosts, embedded preview
++// panes and privacy tools strip it. Setting the policy on the tile <img> elements themselves
++// overrides a stricter page-level policy such as "no-referrer".
++export const TILE_REFERRER_POLICY = 'strict-origin-when-cross-origin' as const;
++
++export interface TileHealth { loaded: number; failed: number }
++export type TileStatus = 'loading' | 'ok' | 'unavailable';
++export const FAILED_TILES_BEFORE_UNAVAILABLE = 3;
++
++export function tileStatus(h: TileHealth): TileStatus {
++  if (h.loaded > 0) return 'ok';
++  return h.failed >= FAILED_TILES_BEFORE_UNAVAILABLE ? 'unavailable' : 'loading';
++}
++// Reducers for useState. They return the SAME object once the map is known to work,
++// so React does not re-render for every one of the dozens of tiles that load.
++export const onTileLoaded = (h: TileHealth): TileHealth => (h.loaded > 0 ? h : { ...h, loaded: 1 });
++export const onTileFailed = (h: TileHealth): TileHealth => (h.loaded > 0 ? h : { ...h, failed: h.failed + 1 });
+diff --git a/src/styles.css b/src/styles.css
+index 39d8294..25e5491 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -33,6 +33,10 @@ h2 { font-size: 1.05rem; margin-bottom: 0.75rem; }
+ .chip[aria-pressed="true"] { background: #1c3558; border-color: var(--link); }
+ .map-wrap { margin-top: 0.75rem; }
+ .map { height: 62vh; min-height: 420px; border: 1px solid var(--line); border-radius: 8px; z-index: 0; }
++.map-wrap[data-tiles="unavailable"] .leaflet-container { background: #0e1b30; }
++.help { color: var(--muted); font-size: 0.85rem; margin-top: 0.5rem; }
++.help summary { cursor: pointer; }
++.help p { margin: 0.4rem 0 0; }
+ .legend { color: var(--muted); font-size: 0.82rem; margin: 0.5rem 0 0; }
+ .popup { color: #0b1526; line-height: 1.5; }
+ .popup a { color: #0b5d99; }
+diff --git a/tests/mapTiles.test.ts b/tests/mapTiles.test.ts
+new file mode 100644
+index 0000000..5901f72
+--- /dev/null
++++ b/tests/mapTiles.test.ts
+@@ -0,0 +1,50 @@
++import { describe, expect, it } from 'vitest';
++import indexHtml from '../index.html?raw';
++import headersFile from '../public/_headers?raw';
++import {
++  FAILED_TILES_BEFORE_UNAVAILABLE, TILE_ATTRIBUTION, TILE_REFERRER_POLICY, TILE_URL,
++  onTileFailed, onTileLoaded, tileStatus,
++} from '../src/lib/tiles';
++import type { TileHealth } from '../src/lib/tiles';
++
++// Policies the OpenStreetMap wiki lists as sending a Referer.
++const POLICIES_THAT_SEND_A_REFERER = [
++  'no-referrer-when-downgrade', 'origin', 'origin-when-cross-origin', 'strict-origin', 'strict-origin-when-cross-origin',
++];
++const run = (events: Array<'load' | 'fail'>): TileHealth =>
++  events.reduce((h, e) => (e === 'load' ? onTileLoaded(h) : onTileFailed(h)), { loaded: 0, failed: 0 } as TileHealth);
++
++describe('basemap configuration', () => {
++  it('uses OpenStreetMap tiles with visible attribution', () => {
++    expect(TILE_URL).toBe('https://tile.openstreetmap.org/{z}/{x}/{y}.png');
++    expect(TILE_ATTRIBUTION).toContain('https://www.openstreetmap.org/copyright');
++    expect(TILE_ATTRIBUTION).toContain('OpenStreetMap');
++  });
++  it('sets a tile referrer policy that sends a Referer (OpenStreetMap requires one)', () => {
++    expect(POLICIES_THAT_SEND_A_REFERER).toContain(TILE_REFERRER_POLICY);
++  });
++  it('also declares the policy for the whole page and for the Cloudflare host', () => {
++    expect(indexHtml).toMatch(/<meta name="referrer" content="strict-origin-when-cross-origin"/);
++    expect(headersFile).toMatch(/Referrer-Policy:\s*strict-origin-when-cross-origin/);
++  });
++});
++
++describe('tileStatus (is the basemap working?)', () => {
++  it('starts as loading', () => expect(tileStatus(run([]))).toBe('loading'));
++  it('is ok as soon as one tile loads', () => expect(tileStatus(run(['load']))).toBe('ok'));
++  it(`is unavailable after ${FAILED_TILES_BEFORE_UNAVAILABLE} failures with no successes`, () => {
++    expect(tileStatus(run(['fail', 'fail']))).toBe('loading');
++    expect(tileStatus(run(['fail', 'fail', 'fail']))).toBe('unavailable');
++  });
++  it('stays ok if some tiles fail after others loaded', () => {
++    expect(tileStatus(run(['load', 'fail', 'fail', 'fail', 'fail']))).toBe('ok');
++  });
++  it('recovers to ok if a tile loads after failures', () => {
++    expect(tileStatus(run(['fail', 'fail', 'fail', 'load']))).toBe('ok');
++  });
++  it('returns the same object once ok, so React does not re-render per tile', () => {
++    const ok = run(['load']);
++    expect(onTileLoaded(ok)).toBe(ok);
++    expect(onTileFailed(ok)).toBe(ok);
++  });
++});
+diff --git a/tests/mapTilesDom.test.ts b/tests/mapTilesDom.test.ts
+new file mode 100644
+index 0000000..b9297f3
+--- /dev/null
++++ b/tests/mapTilesDom.test.ts
+@@ -0,0 +1,40 @@
++// @vitest-environment jsdom
++import { afterEach, describe, expect, it } from 'vitest';
++import { act, createElement } from 'react';
++import { createRoot } from 'react-dom/client';
++import { MapView } from '../src/components/MapView';
++import { TILE_REFERRER_POLICY } from '../src/lib/tiles';
++
++(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++// jsdom has no layout, so give every element a size. Leaflet only creates tiles for a map that has a size.
++Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 800 });
++Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 600 });
++
++let unmount: (() => void) | null = null;
++afterEach(() => { unmount?.(); unmount = null; });
++
++describe('MapView in a DOM', () => {
++  it('puts the referrer policy on every tile image it creates', async () => {
++    const host = document.createElement('div');
++    document.body.appendChild(host);
++    const root = createRoot(host);
++    unmount = () => act(() => root.unmount());
++    await act(async () => root.render(createElement(MapView, { events: [], region: 'global', selected: null, onSelect: () => {} })));
++    const tiles = Array.from(host.querySelectorAll<HTMLImageElement>('img.leaflet-tile'));
++    expect(tiles.length).toBeGreaterThan(0);
++    for (const tile of tiles) expect(tile.referrerPolicy).toBe(TILE_REFERRER_POLICY);
++    expect(tiles[0].src).toContain('https://tile.openstreetmap.org/');
++  });
++
++  it('shows the OpenStreetMap attribution and the help text, and no failure notice before any tile has failed', async () => {
++    const host = document.createElement('div');
++    document.body.appendChild(host);
++    const root = createRoot(host);
++    unmount = () => act(() => root.unmount());
++    await act(async () => root.render(createElement(MapView, { events: [], region: 'global', selected: null, onSelect: () => {} })));
++    expect(host.querySelector('.leaflet-control-attribution')?.textContent).toContain('OpenStreetMap');
++    expect(host.querySelector('details.help summary')?.textContent).toContain('Map background not loading');
++    expect(host.querySelector('.map-wrap')?.getAttribute('data-tiles')).toBe('loading');
++    expect(host.textContent).not.toContain('map background could not be loaded');
++  });
++});
+-- 
+2.43.0
+
